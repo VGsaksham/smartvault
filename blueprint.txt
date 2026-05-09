@@ -1,0 +1,826 @@
+﻿SmartVault
+Intelligent File & Document Management System
+Complete System Blueprint — Version 2.0
+Bare-Metal Install · Multi-Company · Multi-FY · Disaster Recovery
+Prepared for
+Version
+Date
+Status
+Your Organisation
+v2.0
+April 2025
+Ready for Development
+1. Executive Summary
+   — What SmartVault is
+SmartVault is a local-network, browser-based document and file management system for offices managing large volumes of documents across multiple companies, departments, and financial years. It runs entirely on your own dedicated server — no cloud, no Docker, no external dependencies — giving you complete data privacy and control.
+A
+ll requirements including: bare-metal server installation, multi-company and multi-FY structure (April–March), full file extension support including video and audio on external HDDs, corrected FY lock and archive rules, full-path search results, disaster recovery plan, QR code thermal label printing, expiry and retention dates, duplicate file detection, Gmail email notifications, bulk operations, department dashboards, offline read-only mode, dark mode, and document retention policies.
+2. Server & Storage Architecture
+ 
+2.2 Storage layout
+Two physical storage types — M.2 NVMe SSD for the system brain, large HDD for all file data:
+What
+Drive type
+Mount path
+Contents
+Operating system
+M.2 NVMe SSD
+/ (root)
+Ubuntu 22 LTS
+SmartVault app
+M.2 NVMe SSD
+/opt/smartvault/
+Node.js app, config files
+PostgreSQL database
+M.2 NVMe SSD
+/var/lib/postgresql/
+Users, permissions, metadata, audit logs
+Elasticsearch
+M.2 NVMe SSD
+/var/lib/elasticsearch/
+Search index for all files
+Redis cache
+M.2 NVMe SSD
+/var/lib/redis/
+Session data, fast read cache
+NGINX
+M.2 NVMe SSD
+/etc/nginx/
+Web gateway config
+MinIO file storage
+Large HDD
+/mnt/storage/minio/
+All uploaded documents, images, Office files
+External HDD-01
+External HDD
+/mnt/hdd01/
+Video files — MP4, MOV, MKV, AE, PR etc.
+External HDD-02
+External HDD
+/mnt/hdd02/
+Audio files — MP3, WAV, FLAC, reels
+Backup drive
+Dedicated backup HDD
+/mnt/backup/
+Daily automated snapshots
+2.3 Server requirements (20–50 users)
+Component
+Minimum
+Recommended
+Notes
+CPU
+4-core Intel i5
+8-core Intel i7/i9 or Xeon
+More cores = faster multi-user performance
+RAM
+16 GB
+32 GB
+Elasticsearch alone needs 4 GB minimum
+M.2 NVMe SSD
+256 GB
+512 GB
+OS + app + databases
+File storage HDD
+2 TB
+4–8 TB RAID
+All documents, office files
+External HDDs
+Per existing drives
+Label and mount each
+Video, audio, media files
+Backup HDD
+4 TB
+8 TB
+Dedicated — nothing else stored here
+Network
+100 Mbps LAN
+1 Gbps Gigabit LAN
+Gigabit switch recommended
+OS
+Ubuntu 22 LTS
+Ubuntu 22 LTS
+Free, best compatibility with the stack
+UPS
+Strongly recommended
+Required
+Prevents data loss during power cuts
+2.4 How services start (systemd)
+Every SmartVault service runs as a systemd unit — the standard Ubuntu way to manage background services. After installation, all services start automatically when the server boots and restart automatically if they crash.
+Service
+systemd unit name
+What it does
+Node.js app
+smartvault-app.service
+Main application server
+PostgreSQL
+postgresql.service
+Database
+Elasticsearch
+elasticsearch.service
+Search engine
+Redis
+redis-server.service
+Cache and sessions
+NGINX
+nginx.service
+Web gateway and HTTPS
+MinIO
+minio.service
+File storage server
+Backup scheduler
+smartvault-backup.timer
+Runs nightly backup at 2 AM
+FY auto-create
+smartvault-fy.timer
+Creates new FY folder on 1 Apr each year
+3. Company & Financial Year Structure
+   — Multi-company, April–March FY
+3.1 Company types
+Admin creates and configures all companies from the Admin panel. Four company types are supported:
+Type
+Example
+Behaviour
+Parent company
+ABC Group Pvt. Ltd.
+Top-level entity. Can view all subsidiaries in one view if permitted.
+Subsidiary
+ABC Films Pvt. Ltd.
+Linked to a parent. Separate files, separate users, own FY structure.
+Division / branch
+ABC North Branch
+Shares parent company settings. Sub-entity of a parent.
+Independent entity
+XYZ Productions
+Completely standalone. No link to any other company.
+Each company has its own: departments, users, permission sets, FY folders, storage quota, and audit log. An Admin user can be granted access to multiple companies.
+3.2 Financial year rules (April 1 – March 31)
+Rule
+Detail
+FY format
+April 1 to March 31 each year. Displayed as "FY 2025-26", "FY 2024-25" etc.
+Default on login
+System always opens the current active FY automatically on login.
+FY switcher
+Dropdown always visible in the top bar. User can switch FY without logging out.
+Auto-creation
+System creates a new FY folder structure on 1 April each year via scheduled task.
+Manual creation
+Admin can also create a new FY manually at any time (e.g. to prepare in advance).
+Current FY badge
+Current FY is marked with a green "Current" badge everywhere it appears.
+Global search
+The search system always searches ALL FYs and ALL companies simultaneously by default. User can narrow scope.
+3.3 Archived FY rules (corrected)
+RULE: When a FY ends on 31 March, it becomes "Archived" automatically. Archived FYs are read-only and downloadable by default. No user except Admin can upload, edit, or move files in an archived FY — unless Admin explicitly grants that permission.
+State
+Who can access
+Upload / edit
+Download
+Admin can grant edit permission?
+Active FY (current)
+All users per normal permissions
+Yes, per role
+Yes
+N/A — FY is active
+Archived FY (closed)
+All users who had access
+No — read-only by default
+Yes — always
+Yes — Admin unlocks for specific user or role. Logged.
+Locked FY (Admin-set)
+All users
+No — locked for everyone
+Yes — always
+Yes — Admin can grant specific user override. Requires reason. Logged.
+The difference between Archived and Locked: Archived happens automatically at FY end — read-only but editable if Admin grants permission. Locked is a deliberate Admin action (e.g. after audit sign-off) — even stronger restriction. Both states require a logged reason when permission is granted to override them.
+4. File Extension Support & Storage
+   — All file types, all drives
+SmartVault accepts and indexes every file extension with no restrictions. Files are categorised for display but there is no block list.
+Category
+Extensions
+Preview in browser
+Where stored
+Documents
+PDF, DOC, DOCX, XLS, XLSX, PPT, PPTX, TXT, CSV, ODT
+Yes — built-in viewer
+Primary HDD (MinIO)
+Images
+JPG, PNG, GIF, TIFF, BMP, WEBP, HEIC, RAW, SVG
+Yes — image viewer
+Primary HDD (MinIO)
+Video
+MP4, MOV, AVI, MKV, WMV, FLV, WebM, M4V, MPEG
+Yes — browser player, streamed
+External HDD-01
+Audio
+MP3, WAV, AAC, FLAC, OGG, M4A, AIFF, WMA
+Yes — browser audio player
+External HDD-02
+Design / Edit
+PSD, AI, INDD, XD, FIG, AEP (After Effects), PRPROJ (Premiere)
+Thumbnail only
+External HDD-01 or 02
+3D / CAD
+OBJ, FBX, DWG, STL, BLEND, DXF
+Thumbnail only
+Primary HDD or HDD-01
+Archives
+ZIP, RAR, 7Z, TAR, GZ
+File list inside shown
+Primary HDD (MinIO)
+Code / Data
+JS, PY, HTML, JSON, XML, SQL
+Text preview
+Primary HDD (MinIO)
+Any other
+All other extensions
+Download only
+Primary HDD (MinIO)
+Video and audio files stored on external HDDs are streamed to the browser — the user never needs to download a 2 GB file to preview it. The file stays on the HDD at all times.
+4.1 External HDD management
+Scenario
+How SmartVault handles it
+HDD always connected
+Mounted as named volumes at boot. Indexed and searchable like any folder.
+New HDD added
+Admin mounts it in Settings → Storage → Add drive. Assign name, department, and path.
+HDD at 80% capacity
+Admin receives email alert and dashboard warning.
+HDD goes offline
+Files on that drive show "Offline — drive unavailable" badge. Rest of system unaffected.
+Re-indexing a drive
+Admin runs "Re-index drive" from Settings. Picks up new files added outside SmartVault.
+5. Search System
+   — Full path · Scoped · Voice
+5.1 Full path in every search result
+Every search result shows the complete path from company root to filename. Every segment of the path is clickable — clicking any segment navigates directly to that folder. This means a user can find a file and immediately jump to its containing folder in one click.
+Example path shown in result:
+ABC Group Pvt. Ltd.  ›  FY 2025-26  ›  Finance  ›  Invoices  ›  FIN-2025-04-0187-Q1Invoice.xlsx
+Each segment (company, FY, department, subfolder, filename) is individually clickable. There is also an "Open folder" shortcut button on every result that jumps directly to the parent folder.
+5.2 Search scope — where to search
+Scope option
+What it searches
+All companies + all FYs (default)
+Every file across every company, every FY, and every department the user has access to
+This company only
+All FYs within the currently selected company
+This FY only
+Only files within the currently selected company and FY
+This folder only
+Only files within the folder currently open — recursive (includes subfolders)
+Custom scope
+User selects one or more specific companies, FYs, or departments to search within
+5.3 Search filters
+Filter
+How it works
+File name
+Partial or exact match. "invoice" finds "Q1Invoice", "InvoiceFinal", "invoice_copy" etc.
+Match case
+Toggle on to make search case-sensitive. Off by default.
+Date range
+From → to date picker. Also quick-select: Today, This week, This month, This FY, Custom range.
+Year / month / day
+Dedicated year, month, and day dropdowns for precise date filtering.
+Department
+Multi-select department filter. Tick one or more departments.
+Company
+Filter by one or more companies (for users with multi-company access).
+FY
+Filter by one or more financial years.
+File type / extension
+Category buttons (Docs, Video, Audio, Images, Design) or type a specific extension.
+Text inside file
+OCR-indexed content search. Finds text inside scanned PDFs and images.
+Tags
+Search by user-assigned or AI-assigned tags.
+Voice search
+Microphone button. Speak the query — converted to text automatically.
+Uploaded by
+Search files uploaded by a specific user.
+FY status
+Filter by Current, Archived, or Locked FY.
+HDD location
+Filter to show only files on a specific external drive.
+5.4 Search result information
+Each result card shows: file icon, file name (with search terms highlighted), full clickable path, FY badge (current / archived / locked), file extension badge, file size, last modified date, last modified by, user's permission on that file (Read-only / Read+Edit), and a content snippet with matching terms highlighted if the match was inside the file content.
+6. Permission System
+   — User · Role · Group · Department
+6.1 Permission levels
+Level
+Set by
+Applies to
+Example
+Individual user
+Admin
+One specific person
+Priya can edit Finance/Invoices even though her role normally cannot
+Role
+Admin
+All users with that role
+All "Staff" users can upload but not move files
+Group
+Admin
+All members of a named group
+"Finance Team" group has access to Finance and shared HR folders
+Department
+Admin
+All users in a department
+Legal dept users can only see Legal and shared folders
+Permissions stack in priority order: Individual overrides Role, Role overrides Group, Group overrides Department default. Admin sees a "Effective permissions" panel for any user showing exactly what their combined permissions are.
+6.2 The no-delete rule
+NO USER EXCEPT ADMIN CAN DELETE ANY FILE OR FOLDER — UNDER ANY CIRCUMSTANCE. This rule cannot be overridden by any permission setting, role, or group. Even Department Managers cannot delete. Only Admin users can permanently delete, and every deletion requires a typed reason which is stored forever in the audit log.
+6.3 Built-in roles
+Role
+Upload
+Edit
+Move
+Delete
+View logs
+Admin panel
+Admin
+Yes
+Yes
+Yes
+Yes — with reason
+All departments
+Yes — full
+Department Manager
+Yes
+Yes — own dept
+Yes — own dept
+No
+Own dept only
+No
+Staff User
+Yes
+Own uploads only
+No
+No
+No
+No
+Read-only / Guest
+No
+No
+No
+No
+No
+No
+Custom role
+Admin-set
+Admin-set
+Admin-set
+No (always)
+Admin-set
+No
+6.4 Archived and locked FY permissions
+FY State
+Default access
+Admin override
+Override is logged?
+Archived
+Read + download only
+Admin grants edit permission to specific user or role
+Yes — with mandatory reason
+Locked
+Download only
+Admin grants override to specific user — even stronger than archived
+Yes — with mandatory reason and expiry date for the override
+7. Audit Log & Version Rollback
+   — Full history · One-click restore
+Every action in SmartVault is recorded permanently. Logs are never deleted — only Admin can export them. The rollback system works like Google Sheets version history: any action can be reversed with one click.
+7.1 What is logged
+Action type
+What is recorded
+Upload
+User, filename, auto-name, department, company, FY, file size, timestamp, IP address
+Edit / rename
+User, old name, new name, full path, timestamp, what changed
+Move
+User, file/folder, old path (full), new path (full), timestamp
+Download
+User, filename, full path, timestamp — useful for audit compliance
+Permission change
+Admin, affected user/role/group, what permission changed, old value, new value
+FY lock / unlock / archive
+Admin, FY, action, reason, timestamp
+Login / logout
+User, timestamp, IP address, device/browser
+Failed login
+Username attempted, timestamp, IP — security monitoring
+Delete
+Admin only, filename, full path, reason typed by Admin, timestamp — never erasable
+Bulk operation
+Admin/user, list of all files affected, action, timestamp
+Duplicate detected
+User, filename, duplicate of (full path), action taken
+Retention alert sent
+File, recipient, alert type (90-day / 30-day / expired)
+QR label printed
+User, file/folder, timestamp
+7.2 Rollback
+Admin opens Audit Log and filters by user, date, or file
+Selects any action and clicks "Rollback this action"
+System previews what will change before applying
+After confirmation, the rollback itself is logged as a new audit entry
+Rollback is available for: Move, Rename, Permission change, Edit, Bulk operation
+Rollback is NOT available for: Delete (deleted files are gone — backups are the recovery path), Login events
+8. All Additional Features
+   — 9 new features fully specified
+8.1 QR Code Label Printing (Thermal — Dymo / Zebra)
+Every file and folder in SmartVault has a unique QR code. Stick the printed label on the physical document — scanning it with any phone camera instantly opens the digital file.
+Aspect
+Design detail
+QR content
+Direct URL to the file: http://[server-ip]/file/FIN-2025-04-0187
+Printer support
+Dymo LabelWriter and Zebra ZD series via ZPL/DYMO XML. Printer model set once by Admin in Settings.
+Label sizes
+25×25mm, 38×25mm, 57×32mm — configured by Admin. User selects size at print time.
+Label content
+QR code + short filename + department + FY + date — all on one small label.
+Single print
+Right-click any file or folder → Print QR label → one click.
+Bulk print
+Select multiple files → right-click → Print QR labels → all sent as one print job.
+Folder QR
+Folders also have QR codes. Scan opens the folder view in browser.
+Reprint
+Any label can be reprinted at any time from the file detail panel.
+Printer setup
+Admin adds printer IP address or USB port once in Settings → Printing. All users then print with one click.
+8.3 Duplicate File Detection (SHA-256 hash, no AI required)
+Uses SHA-256 hashing — a mathematical fingerprint of the file's exact content. Two files with identical content produce an identical hash, regardless of filename. This is 100% accurate and requires no AI.
+Scenario
+System behaviour
+Upload identical file, different name
+System detects hash match during upload, shows warning panel before saving.
+Warning panel shows
+Original filename, full path, upload date, uploaded by — user decides what to do.
+User choices in warning panel
+"Keep both", "Replace original", "Cancel upload", "View original first"
+Initial duplicate scan
+Background scan runs on first setup — finds all existing duplicates across all storage.
+Ongoing scan
+Background job runs weekly to detect any duplicates added outside SmartVault.
+Duplicate report
+Admin runs Duplicate Report: shows all pairs, storage wasted, recommended action.
+Cross-company check
+Optional setting — Admin enables cross-company duplicate detection if needed.
+Performance
+SHA-256 hash calculated server-side during upload. Adds less than 1 second for most files.
+8.4 Email Notifications (Gmail / Google Workspace via SMTP)
+Uses Gmail SMTP with an app password — setup takes 5 minutes in Admin settings, no third-party service needed, and no monthly cost.
+Notification trigger
+Who gets it
+When
+File uploaded to your department
+Department manager
+Instant or daily digest (user choice)
+File you own was edited or moved
+File owner + dept manager
+Instant
+File shared with you
+You
+Instant
+HDD storage above 80%
+Admin only
+Once per threshold hit
+Duplicate file detected during upload
+Uploader
+Instant
+FY locked, unlocked, or archived
+All department managers
+Instant
+New user account created
+New user — welcome email with login instructions
+On account creation
+Login from new IP address
+That user — security alert
+Instant
+Bulk operation affecting your files
+File owners affected
+Instant
+Each user controls their own notification preferences via a Notifications panel in their profile — they can turn off any notification type or switch from instant to daily digest.
+8.5 Bulk Rename and Move
+Operation
+How it works
+Bulk move
+Select any files/folders → right-click → Move to → browse destination → confirm. No limit on number.
+Bulk rename
+Select files → Rename → choose naming pattern: [DEPT]-[FY]-[SEQ]-[CUSTOM] or free text template.
+Rename preview
+Shows full before/after list of all file names before applying. User can adjust before confirming.
+Bulk copy
+Same as move but originals are kept. New copies indexed automatically.
+Bulk tag
+Add or remove tags from any number of files in one action.
+Bulk set expiry
+Apply the same retention date to all selected files at once.
+Bulk print QR
+Send QR label print jobs for all selected files in one batch.
+Bulk download
+Download selected files as a ZIP archive.
+Undo
+Every bulk operation is fully logged. Admin can rollback from Audit Log. User can undo within 5 minutes from a toast notification.
+Scale
+No hard limit. Tested for 1,000+ files in one operation.
+8.6 Department Dashboards
+Each department has a dedicated dashboard. Department managers see their department's full activity and storage at a glance. Admins see all department dashboards.
+Dashboard widget
+What it shows
+Storage usage
+Total files, total size, breakdown by drive (primary HDD vs external HDD-01/02), quota % used.
+Recent activity
+Last 20 actions in this department — who did what, when, to which file.
+Expiry warnings
+All files expiring in next 90 days, sorted by urgency. One-click to review each.
+Top uploaders
+Which users uploaded most this month — useful for tracking workload.
+File type breakdown
+Chart: how many PDFs vs Excel vs Word vs video vs audio in this department.
+Pending reviews
+Files in "Awaiting review" state (post-expiry). Action required from manager.
+Duplicate alerts
+Any duplicate files detected this week, awaiting resolution.
+Cross-FY comparison
+This FY vs last FY — file count and storage used side by side.
+Quick actions
+Buttons: Upload, New folder, Run duplicate scan, Export activity report.
+8.7 Offline Mode (Read-only)
+When a device loses connection to the office server — network outage, server maintenance, or working from outside the office — recently accessed files remain viewable without any special setup.
+Aspect
+How it works
+Technology
+Service Worker — built into modern browsers. Registers automatically on first login. Nothing to install.
+What is cached
+Last 50 viewed files and folder listings. Cached automatically in the background as user browses.
+What works offline
+View file metadata, read cached previews (PDFs, images, text documents), browse folder structure.
+What does not work offline
+Upload, edit, move, delete, search new content, print QR labels.
+Offline indicator
+Yellow banner at top: "Offline — showing cached content. Reconnecting…" with a spinner.
+Reconnect
+As soon as the server is reachable again, the banner disappears and full functionality returns automatically.
+Cache size
+Admin sets per-user cache limit in Settings. Default 500 MB. User can also clear their cache manually.
+Mobile and tablet
+Works identically on tablets and phones — same Service Worker technology.
+8.8 Dark Mode
+Aspect
+Design detail
+Toggle
+Sun/moon icon in top right corner — always visible on every page.
+Per user
+Preference saved to user account. Persists across devices and login sessions.
+System sync
+Optional "Follow system setting" — auto-switches when OS switches between light and dark mode.
+Coverage
+All UI components: folder explorer, search, dashboards, admin panels, modals, QR print preview.
+Folder colours
+Importance colours (red/orange/green/grey) are adjusted slightly lighter in dark mode for visibility.
+File icons
+All file type icons have dark mode variants.
+8.9 Document Retention Policy (System-level)
+Admin defines retention rules that apply automatically to new files — no manual date-setting needed per file. Rules are evaluated in priority order.
+Priority
+Policy level
+Example
+Who sets it
+1 (highest)
+Manual override on individual file
+This specific NDA: keep until 1 Jun 2030
+Any user with edit permission
+2
+File type + department rule
+All PDFs in Legal: keep 10 years
+Admin
+3
+Department default
+All HR files: keep 10 years
+Admin
+4
+Company default
+ABC Group: keep all files 5 years
+Admin
+5 (lowest)
+Global default
+All files: keep 3 years unless overridden
+Admin
+The policy engine walks from Priority 1 to Priority 5 and applies the first rule it finds. Admin sees a Policy Summary screen showing exactly which rule applies to every file type in every department, with a clear explanation of why.
+9. Disaster Recovery Plan
+   — Three-tier · RTO under 4 hours
+Disaster recovery means: if something goes wrong — accidental file deletion, database corruption, hard drive failure, power surge, fire, theft — how quickly can SmartVault be restored? This plan gives three tiers of protection.
+9.1 Tier 1 — Live server (zero recovery time)
+This is the running system. No recovery needed if the server is healthy. Protection at this tier comes from the OS and file system reliability:
+M.2 NVMe SSD for OS and databases — much more reliable than HDDs for read/write operations
+PostgreSQL write-ahead logging — database is crash-safe; no data loss even if power cuts mid-write
+MinIO file storage with checksums — detects and alerts on file corruption automatically
+UPS (uninterruptible power supply) — gives the server time to shut down cleanly during a power cut
+9.2 Tier 2 — Dedicated backup HDD (recovery in 2–30 minutes)
+A dedicated backup hard drive at /mnt/backup/ — a separate physical drive used for nothing else. Automated scripts run every night at 2 AM.
+What is backed up
+Method
+Schedule
+Retention
+PostgreSQL database
+pg_dump — full snapshot
+Every night at 2 AM
+Last 30 daily snapshots
+All files (MinIO)
+rsync — only changed files copied
+Every night at 2 AM
+Mirror of live storage
+Video/audio (HDD-01/02)
+rsync — changed files only
+Every 6 hours
+Mirror of live drives
+App configuration
+cp — full copy of /opt/smartvault and /etc/nginx
+Every night at 2 AM
+Last 7 copies
+Elasticsearch index
+Elasticsearch snapshot API
+Every night at 3 AM
+Last 7 snapshots
+9.3 Tier 3 — Offsite copy (protection against physical disaster)
+Protects against fire, theft, flooding, or total loss of the server room. Weekly or monthly copy of Tier 2 backup to an offsite location.
+Option A: External USB hard drive taken offsite by a trusted staff member weekly
+Option B: Copy to a second office or home NAS over a VPN connection
+Option C: Cold cloud storage (Backblaze B2 or similar) — very low cost for infrequent access
+9.4 Recovery scenarios and time targets
+Scenario
+Cause
+Recovery steps
+Time to recover
+Single file accidentally moved/renamed
+User error
+Rollback from Audit Log — one click
+Under 2 minutes
+Single file lost from storage
+Disk error or accidental overwrite
+Restore file from Tier 2 rsync mirror
+Under 5 minutes
+Database corrupted
+Disk error, software bug, or power surge
+pg_restore from last Tier 2 snapshot
+Under 30 minutes
+Elasticsearch index corrupted
+Software failure
+Restore from Elasticsearch snapshot or rebuild from PostgreSQL metadata
+30–60 minutes
+Full HDD failure (file storage)
+HDD dies
+Replace HDD, restore files from Tier 2 rsync mirror
+2–4 hours depending on data size
+Full server failure
+Hardware failure, fire, theft
+New server, install Ubuntu + stack, restore from Tier 2 backup
+2–6 hours
+Total site loss (fire/flood)
+Physical disaster
+New server + restore from Tier 3 offsite copy
+4–12 hours
+9.5 Backup monitoring
+Admin receives a daily email: "Last night's backup completed successfully. 14,832 files. DB: 2.1 GB."
+If backup fails, Admin receives an immediate alert email
+Admin dashboard shows last backup time, size, and status at all times
+Monthly: Admin reviews Tier 3 offsite copy and confirms it is current
+10. Technology Stack
+   — Bare-metal · All open source · No licence fees
+Technology
+Installed as
+Purpose
+Why chosen
+Ubuntu 22 LTS
+OS on M.2 SSD
+Operating system
+Free, stable, 5-year support, best compatibility
+Node.js + Express
+npm + systemd service
+Application server and API
+Fast, handles 50 concurrent users easily
+PostgreSQL
+apt package + systemd
+Main database
+Stores users, permissions, metadata, audit logs. Free, rock-solid.
+Elasticsearch
+apt package + systemd
+Search engine
+Lightning-fast full-text and OCR search. Free open-source version.
+Redis
+apt package + systemd
+Cache and sessions
+Makes pages load instantly for repeated queries.
+MinIO
+Binary + systemd
+File object storage
+Like private Google Drive. Runs on your HDD. Free.
+NGINX
+apt package + systemd
+Web gateway and HTTPS
+Routes all browser traffic. Adds SSL encryption. Free.
+Tesseract OCR
+apt package
+Text extraction from scans
+Reads text inside scanned images and PDFs. Free.
+React.js + Tailwind
+Node build tool
+Browser interface
+Fast, works on all browsers, mobile, tablet. Free.
+Web Speech API
+Browser built-in
+Voice search input
+Built into Chrome/Edge/Safari. No cost or install.
+Node-cron
+npm package
+Scheduled tasks (backup, FY creation)
+Runs tasks on a schedule. Free.
+Nodemailer + Gmail SMTP
+npm package
+Email notifications
+Sends emails via your Gmail. Free.
+node-qrcode + ZPL
+npm packages
+QR code generation and thermal printing
+Creates QR codes, formats for Dymo/Zebra. Free.
+Sharp
+npm package
+File thumbnails and previews
+Generates preview images for all file types. Free.
+OpenAI / Claude API
+External API (optional)
+AI features — tagging, voice, suggestions
+Only active when Admin enters API key. Pay per use.
+12. How to Get This Built
+   — Hiring · Questions · Cost guide
+12.1 What to look for in a developer
+Node.js and React.js — primary skills, non-negotiable
+PostgreSQL — database management, schema design
+Elasticsearch — setup, configuration, index management
+Ubuntu Linux server administration — systemd, NGINX, file permissions
+MinIO or similar object storage setup
+Bonus: experience with thermal label printing (ZPL/Dymo) and Gmail SMTP integratio
+13. Security
+All data stays on your office server — nothing goes to internet or cloud
+HTTPS encryption on local network via NGINX + self-signed certificate
+Passwords stored with bcrypt hashing — never stored as plain text
+JWT session tokens expire after configurable inactivity period (default 8 hours)
+Every login attempt (success and failure) is logged with IP address
+Admin can remotely log out any user or suspend any account instantly
+File access checked on every API request — users cannot access files outside their permissions
+Daily automated backups to separate physical drive
+All file deletions require Admin login confirmation plus a typed reason
+Login from new IP address sends immediate email alert to that user
+14. Glossary
+   — Plain English for every technical term
+Term
+Plain English
+Ubuntu 22 LTS
+A free operating system for servers. LTS means Long Term Support — security updates for 5 years.
+Bare-metal install
+Installing software directly on the server hardware, not inside a container or virtual machine.
+systemd
+Ubuntu's built-in service manager. Starts SmartVault automatically when the server boots.
+React.js
+A tool for building modern web interfaces. Makes the UI fast and works on all browsers.
+Node.js
+The server-side engine. Handles all requests from users' browsers.
+PostgreSQL
+A database — like a very organised Excel sheet that stores all users, permissions, file metadata, and logs.
+Elasticsearch
+A super-fast search engine. Finds files in milliseconds even across hundreds of thousands of records.
+MinIO
+Your own private file storage — like Google Drive but running on your HDD, not the internet. Free.
+Redis
+A speed booster — remembers recently used data so pages load instantly on repeat visits.
+NGINX
+The doorman — manages all browser connections, adds HTTPS encryption, routes traffic to the right service.
+OCR (Tesseract)
+Optical Character Recognition — reads text from scanned images and PDFs so they become searchable.
+SHA-256 hash
+A mathematical fingerprint of a file's content. Identical content = identical fingerprint. Used for duplicate detection.
+rsync
+A backup tool that copies only files that have changed — fast and efficient for large file collections.
+pg_dump / pg_restore
+PostgreSQL's built-in backup and restore commands. Create a complete snapshot of the database.
+Service Worker
+A browser technology that caches content for offline use. Enables the offline read-only mode. Nothing to install.
+ZPL
+Zebra Programming Language — the file format used to send label designs to Zebra thermal printers.
+JWT
+A secure digital token — proves who you are when making requests to SmartVault. Expires automatically.
+API key
+A password that connects SmartVault to an AI service. Without it, all AI features stay disabled.
+FY (Financial Year)
+April 1 to March 31. SmartVault organises all files within FY folders. Current FY is the default view.
+Audit log
+A permanent record of every action — who did what, to which file, when, from which IP address.
+Rollback
+Reversing a logged action — returning a file, folder, or permission to exactly how it was before.
+Retention policy
+A rule that says how long a file must be kept before it can be considered for deletion or archiving.
+UPS
+Uninterruptible Power Supply — a battery backup that gives the server time to shut down safely during a power cut.
+End of SmartVault Complete System Blueprint v2.0
+This document may be shared freely with developers, vendors, or management.

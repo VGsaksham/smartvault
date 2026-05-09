@@ -1,0 +1,194 @@
+/* MARKER: CLEAN REWRITE */
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-inter);
+}
+
+/* ─── Global Transitions ─── */
+* {
+  transition: background-color 0.25s cubic-bezier(0.4, 0, 0.2, 1), 
+              border-color 0.25s cubic-bezier(0.4, 0, 0.2, 1), 
+              color 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+/* Remove mobile tap highlight + keep keyboard focus */
+a,
+button,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+/* ─── Light Mode Tokens ─── */
+:root {
+  --bg-app: #f5f5f7;
+  --bg-surface: #ffffff;
+  --bg-elevated: #fafafc;
+  --bg-neutral: #f5f5f7;
+  --text-primary: #1d1d1f;
+  --text-secondary: rgba(0, 0, 0, 0.56);
+  --text-tertiary: rgba(0, 0, 0, 0.32);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.1);
+  --accent: #0066cc;
+  --accent-soft: rgba(0, 102, 204, 0.08);
+  --shadow-subtle: 0 1px 3px rgba(0, 0, 0, 0.02);
+  --shadow-medium: 0 4px 12px rgba(0, 0, 0, 0.05);
+}
+
+/* ─── Obsidian Charcoal Dark Theme ─── */
+html.dark {
+  color-scheme: dark;
+  --bg-app: #0f0f10;
+  --bg-surface: #18181a;
+  --bg-elevated: #1e1e21;
+  --bg-neutral: #232326;
+  --text-primary: #e4e4e6;
+  --text-secondary: #9a9a9e;
+  --text-tertiary: #636366;
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --accent: #4d8ad4;
+  --accent-soft: rgba(77, 138, 212, 0.12);
+  --shadow-subtle: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-medium: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+body {
+  color: var(--text-primary);
+  background: var(--bg-app);
+  font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+  min-width: 320px;
+  overflow: hidden;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+/* ── Attribute-based Overrides for Legacy Tailwind Classes ── */
+
+/* Backgrounds */
+html.dark [class*="bg-[#ffffff]"], 
+html.dark [class*="bg-white"]      { background-color: var(--bg-surface) !important; }
+html.dark [class*="bg-[#f5f5f7]"]  { background-color: var(--bg-neutral) !important; }
+html.dark [class*="bg-[#fafafc]"], 
+html.dark [class*="bg-[#fafafa]"]  { background-color: var(--bg-elevated) !important; }
+html.dark [class*="bg-[#fdfdfd]"]  { background-color: #1a1a1c !important; }
+html.dark [class*="bg-[rgba(0,0,0,0.4)]"] { background-color: rgba(0, 0, 0, 0.6) !important; }
+
+/* Text */
+html.dark [class*="text-[#1d1d1f]"]          { color: var(--text-primary) !important; }
+html.dark [class*="text-[rgba(0,0,0,0.8)]"]  { color: var(--text-primary) !important; }
+html.dark [class*="text-[rgba(0,0,0,0.64)]"] { color: var(--text-secondary) !important; }
+html.dark [class*="text-[rgba(0,0,0,0.56)]"] { color: var(--text-secondary) !important; }
+html.dark [class*="text-[rgba(0,0,0,0.48)]"] { color: var(--text-secondary) !important; }
+html.dark [class*="text-[rgba(0,0,0,0.4)]"]  { color: var(--text-tertiary) !important; }
+html.dark [class*="text-[rgba(0,0,0,0.36)]"] { color: var(--text-tertiary) !important; }
+html.dark [class*="text-[rgba(0,0,0,0.32)]"] { color: var(--text-tertiary) !important; }
+
+/* Borders */
+html.dark [class*="border-[rgba(0,0,0,0.08)]"] { border-color: var(--border-subtle) !important; }
+html.dark [class*="border-[rgba(0,0,0,0.06)]"] { border-color: var(--border-subtle) !important; }
+html.dark [class*="border-[rgba(0,0,0,0.04)]"] { border-color: var(--border-subtle) !important; }
+html.dark [class*="border-[rgba(0,0,0,0.1)]"]  { border-color: var(--border-default) !important; }
+html.dark [class*="border-transparent"]       { border-color: transparent !important; }
+
+/* Accents & Special States */
+html.dark [class*="bg-[#0066cc]"],
+html.dark [class*="bg-[#007AFF]"]     { background-color: var(--accent) !important; }
+html.dark [class*="text-[#0066cc]"]   { color: var(--accent) !important; }
+html.dark [class*="bg-[#e8f0fe]"]     { background-color: var(--accent-soft) !important; }
+html.dark [class*="text-[#1a56db]"]   { color: var(--accent) !important; }
+html.dark [class*="bg-[#f0f0f5]"]     { background-color: #2a2a2d !important; }
+html.dark [class*="bg-[#fff3f2]"]     { background-color: rgba(255, 59, 48, 0.1) !important; }
+html.dark [class*="text-[#ff3b30]"]   { color: #ff5b52 !important; }
+
+/* Interactions */
+html.dark [class*="hover:bg-[#f5f5f7]"]:hover,
+html.dark [class*="hover:bg-[#e8e8ed]"]:hover { background-color: #2a2a2d !important; }
+html.dark [class*="active:scale-95"]         { transition: transform 0.1s ease; }
+
+/* UI Refinements */
+html.dark input, 
+html.dark select, 
+html.dark textarea {
+  background-color: var(--bg-neutral) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-default) !important;
+  box-shadow: none !important;
+}
+
+html.dark input::placeholder {
+  color: var(--text-tertiary) !important;
+}
+
+html.dark hr {
+  border-color: var(--border-subtle) !important;
+}
+
+/* Scrollbar */
+html.dark ::-webkit-scrollbar-track { background: var(--bg-app); }
+html.dark ::-webkit-scrollbar-thumb { 
+  background: #333336; 
+  border: 3px solid var(--bg-app);
+  border-radius: 10px;
+}
+html.dark ::-webkit-scrollbar-thumb:hover { background: #444448; }
+
+/* Ensure images/videos stay normal */
+html.dark img, 
+html.dark video, 
+html.dark iframe {
+  filter: none !important;
+}
+
+/* ─── Mobile Utilities ─── */
+
+/* Hide scrollbar cross-browser */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.hide-scrollbar::-webkit-scrollbar { display: none; }
+.hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* iOS safe area padding for fixed bottom elements */
+@supports (padding-bottom: env(safe-area-inset-bottom)) {
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+}
+
+/* Smooth momentum scrolling on iOS */
+.overflow-y-auto,
+.overflow-y-scroll {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent text size adjustment on orientation change (iOS) */
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Minimum 44px touch targets on nav items (Apple HIG) — scoped to avoid breaking inline text */
+nav button,
+nav a,
+aside button {
+  min-height: 44px;
+}
+
+@media (max-width: 767px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
