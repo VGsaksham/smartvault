@@ -5,7 +5,6 @@ import { useRouter, usePathname, useSearchParams } from 'next/navigation';
 import { Search, Mic, User, Menu } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
 import { useSidebar } from '@/context/SidebarContext';
-import Link from 'next/link';
 
 function decodeJwtPayload(token: string): any | null {
   try {
@@ -330,22 +329,6 @@ export default function TopBar() {
       ref={searchRef}
       className="fixed top-0 right-0 left-0 md:left-64 z-30 bg-[var(--bg-app)]/85 backdrop-blur-md border-b border-[var(--border-subtle)]"
     >
-      {/* First-run: no companies created yet */}
-      {Array.isArray(companies) && companies.length === 0 && (
-        <div className="px-2 sm:px-3 md:px-6 py-2 border-b border-[var(--border-subtle)] bg-[#ff950015]">
-          <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div className="text-[13px] text-[#a15c00]">
-              No companies found. Create your first company to start using SmartVault.
-            </div>
-            <Link
-              href="/admin/companies"
-              className="inline-flex items-center justify-center px-3 py-2 rounded-[10px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[13px] font-bold"
-            >
-              Go to Companies Setup
-            </Link>
-          </div>
-        </div>
-      )}
       {/* Main row */}
       <div className="h-[52px] flex items-center justify-between px-2 sm:px-3 md:px-6 gap-1.5 md:gap-0">
         {/* Left side: Hamburger (mobile) + Logo + Dropdowns */}
