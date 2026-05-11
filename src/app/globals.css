@@ -192,3 +192,12 @@ aside button {
     font-size: 16px;
   }
 }
+
+/* Hide Next.js dev indicators globally */
+nextjs-portal {
+  display: none !important;
+}
+[data-nextjs-toast] {
+  display: none !important;
+}
+

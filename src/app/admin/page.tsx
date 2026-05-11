@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   HardDrive, Activity, Users, AlertCircle, Building, Clock,
@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
 
-export default function AdminDashboardPage() {
+function AdminDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const companyId = searchParams.get('companyId');
@@ -420,5 +420,13 @@ export default function AdminDashboardPage() {
       </div>
 
     </div>
+  );
+}
+
+export default function AdminDashboardPage() {
+  return (
+    <Suspense fallback={<div className="p-8">Loading...</div>}>
+      <AdminDashboardContent />
+    </Suspense>
   );
 }

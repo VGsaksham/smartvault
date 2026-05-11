@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Layers, Plus, Trash2, Pencil, RefreshCw, Folder as FolderIcon } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
@@ -9,7 +9,7 @@ import { useConfirm } from '@/components/ConfirmProvider';
 type FolderItem = { id: number; name: string };
 type DepartmentItem = { id: number; name: string; folders: FolderItem[] };
 
-export default function AdminStructurePage() {
+function AdminStructureContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const companyId = searchParams.get('companyId');
@@ -525,3 +525,10 @@ export default function AdminStructurePage() {
   );
 }
 
+export default function AdminStructurePage() {
+  return (
+    <Suspense fallback={<div className="p-8">Loading...</div>}>
+      <AdminStructureContent />
+    </Suspense>
+  );
+}

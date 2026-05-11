@@ -249,7 +249,7 @@ function UsersPageContent() {
           can_upload: Boolean(x?.can_upload),
           is_primary: Boolean(x?.is_primary),
         }))
-        .filter((x) => Number.isFinite(x.company_id) && Boolean(x.department));
+        .filter((x: CompanyAccess) => Number.isFinite(x.company_id) && Boolean(x.department));
       const mergedAllowedDepartments = Array.from(
         new Set([
           ...(detailPermData?.allowed_departments || []),

@@ -66,7 +66,7 @@ export default function TopBar() {
         const effectiveRole = tokenRole || parsedUser?.role || null;
         if (effectiveRole !== 'Admin') {
           const ids = Array.from(
-            new Set(
+            new Set<number>(
               (Array.isArray(parsedUser?.company_access) ? parsedUser.company_access : [])
                 .map((entry: any) => Number(entry?.company_id))
                 .filter((id: number) => Number.isFinite(id))
