@@ -182,7 +182,12 @@ function UsersPageContent() {
       if (searchOptionsRes.ok) {
         const s = await searchOptionsRes.json();
         const depts = Array.isArray(s?.departments) ? s.departments.map((d: string) => String(d).trim()).filter(Boolean) : [];
-        setDepartments(Array.from(new Set([...DEFAULT_DEPTS, ...depts])));
+        const merged = Array.from(new Set([...DEFAULT_DEPTS, ...depts]));
+        setDepartments(merged);
+        // Auto-initialize form.department to first option so user doesn't need to interact with dropdown
+        if (merged.length > 0) {
+          setForm(prev => prev.department ? prev : { ...prev, department: merged[0] });
+        }
       }
     } catch {
       // keep defaults
@@ -883,7 +888,7 @@ function UsersPageContent() {
                     <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">{f.label}</label>
                     <select value={(form as any)[f.key]} onChange={e => setForm(p => ({...p, [f.key]: e.target.value}))}
                       className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] py-2.5 px-4 text-[14px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] transition-all">
-                      {f.opts.map(o => <option key={o}>{o}</option>)}
+                      {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
                   </div>
                 ))}
