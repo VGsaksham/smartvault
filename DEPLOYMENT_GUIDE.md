@@ -311,18 +311,53 @@ bash scripts/db-migrate.sh
 npm run preflight
 ```
 
+> **Note:** `npm run preflight` only checks that connections are working. It does **NOT** create the admin user automatically.
+
+### Step 6.1 — Create the First Admin User (Required)
+
+The `ADMIN_BOOTSTRAP_ENABLED` flag in `.env` does nothing — the admin account must be manually injected into the database. Run this command, replacing the email and password with the credentials you want to use to log in:
+
+```bash
+cd /opt/smartvault/smartvault-api
+node -e "
+const pool = require('./src/db/pool');
+const bcrypt = require('bcryptjs');
+
+async function run() {
+  const email = 'PUT_ADMIN_EMAIL_HERE';
+  const password = 'PUT_ADMIN_PASSWORD_HERE';
+  const hash = await bcrypt.hash(password, 10);
+  await pool.query(
+    \`INSERT INTO users (username, email, password_hash, role, department, status)
+     VALUES (\$1, \$2, \$3, 'Admin', 'Management', 'Active')
+     ON CONFLICT (email) DO UPDATE SET password_hash = \$3, role = 'Admin', status = 'Active'\`,
+    ['Admin', email, hash]
+  );
+  console.log('Admin user created:', email);
+  await pool.end();
+}
+run().catch(e => { console.error(e.message); process.exit(1); });
+"
+```
+
+When it prints `Admin user created: [your email]`, the account is live. No server restart needed.
+
 ### Step 7 — frontend env + build
 
 ```bash
 cd /opt/smartvault
 npm install
 
-# If using NGINX same-origin /api, you can skip setting NEXT_PUBLIC_API_BASE_URL.
-# If not, create it:
+# If using NGINX same-origin /api, leave NEXT_PUBLIC_API_BASE_URL blank (recommended).
+# If NOT using NGINX (local/direct testing), you MUST set this to the backend's IP and port:
+# NEXT_PUBLIC_API_BASE_URL=http://YOUR_SERVER_IP:5005
+# DO NOT include /api at the end — the code adds that automatically.
 nano .env.local
 
 npm run build
 ```
+
+> ⚠️ **Important:** `NEXT_PUBLIC_API_BASE_URL` is baked into the code at build time. If you change it in `.env.local`, you MUST run `npm run build` again for the change to take effect. Simply restarting the server will NOT pick up the new value.
 
 ### Step 8 — start services with PM2 (auto restart + reboot)
 
@@ -1529,3 +1564,155 @@ This checks GitHub every 5 minutes and updates server automatically.
 - If your push includes broken code, auto-update will deploy broken code too.
 - Safer pattern: push to staging first, then merge to main after testing.
 - If you want instant update on each push (not every 5 minutes), use GitHub Webhook + deploy endpoint later.
+
+---
+
+## 🔥 Part 11: Troubleshooting — Real-World Errors & Fixes
+
+This section documents every real error encountered during deployment and how to fix it.
+
+---
+
+### 11.1 `must be owner of table users` during `db-migrate.sh`
+
+**Symptom:**
+```
+psql:add_permissions.sql:1: ERROR: must be owner of table users
+```
+
+**Cause:** The base tables were created by the `postgres` system user instead of `vaultadmin`. PostgreSQL blocks `vaultadmin` from altering tables it doesn't own.
+
+**Fix:** Wipe the schema and recreate it correctly using the full base schema script in **Step 3.1** of this guide. That script uses `DROP SCHEMA public CASCADE` to remove all broken tables and then rebuilds them with `ALTER TABLE ... OWNER TO vaultadmin`.
+
+---
+
+### 11.2 `relation "companies" does not exist` during `db-migrate.sh`
+
+**Symptom:**
+```
+psql:normalize_company_management.sql:2: ERROR: relation "companies" does not exist
+```
+
+**Cause:** The `db-migrate.sh` script is incremental — it only modifies existing tables. It does NOT create the initial schema on a fresh database. The `companies` and `financial_years` tables are missing.
+
+**Fix:** Run the full base schema block in **Step 3.1** first, then run `db-migrate.sh`.
+
+---
+
+### 11.3 `JSON.parse: unexpected character at line 1 column 1` on Login
+
+**Symptom:** The login page shows a red error: `JSON.parse: unexpected character at line 1 column 1 of the JSON data`.
+
+**Cause:** The frontend sent the login request to a URL that returned an HTML page (a 404 or error page) instead of a JSON response. This happens when the frontend is pointed at the wrong backend address.
+
+**Fix:** Check the browser's Network tab (F12 → Network → click the failed login request). Look at what URL it tried to reach and what port it used.
+- If the URL port matches the frontend port (e.g., `:3000`), the `NEXT_PUBLIC_API_BASE_URL` variable is missing or wrong.
+- If NGINX is not set up yet, set `NEXT_PUBLIC_API_BASE_URL=http://YOUR_SERVER_IP:5005` in `.env.local` and rebuild.
+
+---
+
+### 11.4 Login returns `404 Not Found` (Frontend calling itself)
+
+**Symptom:**
+```
+POST http://192.168.1.104:3000/api/auth/login [HTTP/1.1 404 Not Found]
+```
+
+**Cause:** The frontend is sending API requests to its own port (3000) instead of the backend API port (5005). This means `NEXT_PUBLIC_API_BASE_URL` is not set.
+
+**Fix:**
+1. Open `.env.local` in the frontend folder.
+2. Add: `NEXT_PUBLIC_API_BASE_URL=http://YOUR_SERVER_IP:5005`
+3. Run `npm run build` — this is **mandatory**, the variable is baked at build time.
+4. Restart the frontend.
+
+---
+
+### 11.5 Wrong variable name — `NEXT_PUBLIC_API_URL` vs `NEXT_PUBLIC_API_BASE_URL`
+
+**Symptom:** You set the env variable but login still hits the wrong port.
+
+**Cause:** The correct variable name used by the frontend code (`src/lib/api.ts`) is `NEXT_PUBLIC_API_BASE_URL`. If you write `NEXT_PUBLIC_API_URL` (without `_BASE_`), the code silently ignores it and falls back to the default.
+
+**Fix:** Make sure the variable in `.env.local` is spelled exactly: `NEXT_PUBLIC_API_BASE_URL`
+
+---
+
+### 11.6 Login returns `500 Internal Server Error`
+
+**Symptom:**
+```
+POST http://192.168.1.104:5005/api/auth/login [HTTP/1.1 500 Internal Server Error]
+```
+
+**Cause:** The backend crashed while processing the login. Most common causes:
+- The database password in the backend `.env` is wrong.
+- The admin user does not exist in the database yet.
+- A `JWT_SECRET` is missing or too short in the backend `.env`.
+
+**Fix:** Look at the terminal where the backend is running. It will print the exact error. Then:
+- If it's a DB connection error, fix `DB_PASSWORD` in `.env` and restart backend.
+- If it's `invalid password` or user not found, run the admin creation script in **Step 6.1**.
+
+---
+
+### 11.7 `CORS blocked origin` error in backend logs
+
+**Symptom:** Backend console shows:
+```
+Error: CORS blocked origin: http://192.168.1.104:3000
+```
+
+**Cause:** The backend has a strict CORS allowlist (`CORS_ORIGINS` in `.env`). The frontend's origin (IP + port) is not on that list, so the backend rejects all requests from it.
+
+**Fix:** Open the backend `.env` and add the frontend URL to `CORS_ORIGINS`:
+```env
+# For testing without NGINX (allow any origin):
+CORS_ORIGINS=*
+
+# For production (allow only your specific frontend URL):
+CORS_ORIGINS=http://YOUR_SERVER_IP:3000,https://yourdomain.com
+```
+Then **restart the backend** (`pm2 restart sv-api` or `node server.js`).
+
+> ⚠️ Do NOT leave `CORS_ORIGINS=*` in production — it allows any website to call your API.
+
+---
+
+### 11.8 Login returns `400 Bad Request` — Invalid credentials
+
+**Symptom:**
+```
+POST http://192.168.1.104:5005/api/auth/login [HTTP/1.1 400 Bad Request]
+```
+
+**Cause:** The network and backend are working perfectly. The email and password entered do not match any account in the database.
+
+**Fix:** Run the admin creation script from **Step 6.1** to create or reset the admin account. Then log in with the exact email and password you put in that script.
+
+---
+
+### 11.9 `ADMIN_BOOTSTRAP_ENABLED` does nothing
+
+**Symptom:** You set `ADMIN_BOOTSTRAP_ENABLED=true` in `.env` and ran `preflight`, but still can't log in.
+
+**Cause:** The `ADMIN_BOOTSTRAP_ENABLED` variable is not referenced anywhere in the backend code. It is a dead variable that has no effect. The `npm run preflight` script only checks connectivity — it never creates users.
+
+**Fix:** Use the manual admin creation script in **Step 6.1**.
+
+---
+
+### 11.10 `/api/api/auth/login` double-API in the URL
+
+**Symptom:**
+```
+POST http://192.168.1.104:5005/api/api/auth/login [404]
+```
+
+**Cause:** The `NEXT_PUBLIC_API_BASE_URL` in `.env.local` ends with `/api` (e.g., `http://IP:5005/api`). The frontend code automatically appends `/api` to every request, resulting in a doubled path.
+
+**Fix:** The variable must NOT end with `/api`. Set it as just the base URL:
+```env
+NEXT_PUBLIC_API_BASE_URL=http://YOUR_SERVER_IP:5005
+```
+Then rebuild with `npm run build`.
