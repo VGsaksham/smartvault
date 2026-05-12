@@ -2,6 +2,8 @@
 
 This guide outlines the process for deploying the SmartVault application (Next.js Frontend, Node.js API, PostgreSQL, and MinIO) onto a fresh Ubuntu 22.04+ LTS production server.
 
+**New:** For a **single teaching-first walkthrough** (plain-language explanations, strict order, **`npm run build` timing**, when **not** to run migrations, embedded schema SQL), use **`DEPLOYMENT_TEACHING_GUIDE.md`**. Keep **this file** for extended troubleshooting and duplicate copy-paste blocks.
+
 ---
 
 ## ✅ Newborn Mode: Run these commands in order (copy/paste)
