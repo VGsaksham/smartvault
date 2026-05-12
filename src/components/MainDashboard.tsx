@@ -8,8 +8,9 @@ import { QRCodeSVG } from 'qrcode.react';
 import DepartmentDashboard from './DepartmentDashboard';
 import { apiUrl } from '@/lib/api';
 import { useConfirm } from '@/components/ConfirmProvider';
+import { CustomSelect } from '@/components/ui/Select';
 
-type StructureDepartment = { name: string; folders: string[] };
+type StructureDepartment = { name: string; folders: { id: number; name: string; parent_folder_id: number | null }[] };
 
 export default function MainDashboard() {
   const [files, setFiles] = useState<any[]>([]);
@@ -334,8 +335,19 @@ export default function MainDashboard() {
     for (const d of structureDepartments) {
       const name = String((d as any)?.name || '').trim();
       if (!name) continue;
-      const folders = Array.isArray((d as any)?.folders) ? (d as any).folders : [];
-      map[name] = folders.map((x: any) => String(x)).filter(Boolean);
+      const folders: any[] = Array.isArray((d as any)?.folders) ? (d as any).folders : [];
+      // Build full slash-separated paths from the flat list with parent_folder_id
+      const folderById = new Map<number, any>(folders.map((f: any) => [f.id, f]));
+      const getPath = (id: number, visited = new Set<number>()): string => {
+        if (visited.has(id)) return '';
+        visited.add(id);
+        const f = folderById.get(id);
+        if (!f) return '';
+        if (!f.parent_folder_id) return String(f.name || '');
+        const parentPath = getPath(f.parent_folder_id, visited);
+        return parentPath ? `${parentPath}/${f.name}` : String(f.name || '');
+      };
+      map[name] = folders.map((f: any) => typeof f === 'string' ? f : getPath(f.id)).filter(Boolean);
     }
     return map;
   }, [structureDepartments]);
@@ -522,22 +534,75 @@ export default function MainDashboard() {
     setIsDragging(false);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      uploadFiles(Array.from(e.dataTransfer.files));
+
+    if (e.dataTransfer.items) {
+      const items = Array.from(e.dataTransfer.items)
+        .map(item => item.webkitGetAsEntry())
+        .filter(Boolean);
+
+      const fileEntries: { file: File, relPath: string }[] = [];
+
+      const traverseFileTree = async (item: any, path: string = '') => {
+        if (!item) return;
+        if (item.isFile) {
+          return new Promise<void>((resolve) => {
+            item.file((file: File) => {
+              fileEntries.push({ file, relPath: path + file.name });
+              resolve();
+            });
+          });
+        } else if (item.isDirectory) {
+          const dirReader = item.createReader();
+          const readEntriesPromise = () => new Promise<any[]>((resolve) => {
+            dirReader.readEntries((entries: any[]) => resolve(entries));
+          });
+          
+          let allEntries: any[] = [];
+          let read = await readEntriesPromise();
+          while(read.length > 0) {
+            allEntries = allEntries.concat(read);
+            read = await readEntriesPromise();
+          }
+          for (const entry of allEntries) {
+            await traverseFileTree(entry, path + item.name + '/');
+          }
+        }
+      };
+
+      for (const item of items) {
+        await traverseFileTree(item);
+      }
+
+      if (fileEntries.length > 0) {
+        const fileList = fileEntries.map(entry => {
+          const parts = entry.relPath.split('/');
+          let targetFolder = uploadFolder || '';
+          if (parts.length > 1) {
+            const relDir = parts.slice(0, -1).join('/');
+            targetFolder = uploadFolder ? `${uploadFolder}/${relDir}` : relDir;
+          }
+          return { file: entry.file, targetFolder: targetFolder || undefined };
+        });
+        uploadFiles(fileList);
+      }
+    } else if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const fileList = Array.from(e.dataTransfer.files).map(file => ({ file, targetFolder: uploadFolder || undefined }));
+      uploadFiles(fileList);
     }
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      uploadFiles(Array.from(e.target.files));
+      const fileList = Array.from(e.target.files).map(file => ({ file, targetFolder: uploadFolder || undefined }));
+      uploadFiles(fileList);
     }
   };
 
-  const uploadFiles = async (files: File[]) => {
-    if (uploading || files.length === 0) return;
+  const uploadFiles = async (fileList: { file: File, targetFolder?: string }[]) => {
+    if (uploading || fileList.length === 0) return;
     if (!uploadDept || uploadDept === "Select Department" || uploadDept === "") {
       setAlertConfig({ title: 'Missing Department', message: 'Please select a department before uploading.', isError: true });
       return;
@@ -545,11 +610,12 @@ export default function MainDashboard() {
     
     setUploading(true);
     let successCount = 0;
+    const failures: string[] = [];
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    for (let i = 0; i < fileList.length; i++) {
+      const { file, targetFolder } = fileList[i];
       setUploadProgress(0);
-      setUploadText(`Uploading ${file.name} (${i + 1} of ${files.length})...`);
+      setUploadText(`Uploading ${file.name} (${i + 1} of ${fileList.length})...`);
       
       const formData = new FormData();
       formData.append('document', file);
@@ -557,7 +623,7 @@ export default function MainDashboard() {
       if (companyId) formData.append('companyId', companyId);
       if (fyId) formData.append('fyId', fyId);
       if (uploadCustomTag) formData.append('customTag', uploadCustomTag);
-      if (uploadFolder) formData.append('folder', uploadFolder);
+      if (targetFolder) formData.append('folder', targetFolder);
 
       try {
         const token = localStorage.getItem('token');
@@ -572,16 +638,23 @@ export default function MainDashboard() {
         successCount++;
       } catch (error: any) {
         console.error(`Upload error for ${file.name}:`, error);
-        const errMsg = error.response?.data?.error || `Server responded with status ${error.response?.status || 'Unknown'}`;
-        setAlertConfig({ title: `Upload Failed for ${file.name}`, message: errMsg, isError: true });
-        setUploading(false);
-        closeUploadModal();
-        return;
+        const errMsg = error.response?.data?.error || `Failed (status ${error.response?.status || 'Unknown'})`;
+        failures.push(`${file.name}: ${errMsg}`);
+        // Continue uploading remaining files — do NOT return or abort here
       }
     }
 
     setUploadProgress(100);
-    setUploadText(`Uploaded ${successCount} file(s) successfully! ✅`);
+    if (failures.length === 0) {
+      setUploadText(`Uploaded ${successCount} file(s) successfully! ✅`);
+    } else {
+      setUploadText(`${successCount} uploaded, ${failures.length} failed.`);
+      setAlertConfig({
+        title: `${failures.length} file(s) failed to upload`,
+        message: failures.slice(0, 5).join('\n') + (failures.length > 5 ? `\n…and ${failures.length - 5} more` : ''),
+        isError: true
+      });
+    }
     fetchFiles();
     setTimeout(() => {
       setUploading(false);
@@ -592,7 +665,8 @@ export default function MainDashboard() {
   const handleHardDownload = async (file: any) => {
     try {
       const token = localStorage.getItem('token');
-      const res = await fetch(apiUrl(`/api/download/${file.minio_filename}`), {
+      const safeFilename = file.minio_filename.split('/').map(encodeURIComponent).join('/');
+      const res = await fetch(apiUrl(`/api/download/${safeFilename}`), {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       const blob = await res.blob();
@@ -844,21 +918,33 @@ export default function MainDashboard() {
     };
   }, [files]);
 
-  // Dynamic folders calculation memoized for performance
+  // Dynamic folders calculation — shows only direct children at current navigation level
   const dynamicFolders = useMemo(() => {
     if (activeDepartment === 'All files') return [];
-    const validFolders = new Set<string>(deptFoldersMap[activeDepartment] || []);
-    
+    // Collect all known full paths (from structure + from actual file data)
+    const allPaths = new Set<string>(deptFoldersMap[activeDepartment] || []);
     if (Array.isArray(files)) {
       files.forEach(f => {
         if (f.department === activeDepartment && f.folder && f.folder !== 'null' && f.folder !== 'undefined') {
-          validFolders.add(f.folder);
+          // Add every ancestor segment of the file's folder path
+          const parts = String(f.folder).split('/');
+          for (let i = 1; i <= parts.length; i++) {
+            allPaths.add(parts.slice(0, i).join('/'));
+          }
         }
       });
     }
-    
-    return Array.from(validFolders).sort((a, b) => a.localeCompare(b));
-  }, [files, activeDepartment, deptFoldersMap]);
+    if (!activeFolder) {
+      // At root: show only top-level folders (no '/' in path)
+      return Array.from(allPaths).filter(p => !p.includes('/')).sort((a, b) => a.localeCompare(b));
+    } else {
+      // Inside a folder: show only direct children (prefix matches and exactly one more segment)
+      const prefix = activeFolder + '/';
+      return Array.from(allPaths)
+        .filter(p => p.startsWith(prefix) && !p.slice(prefix.length).includes('/'))
+        .sort((a, b) => a.localeCompare(b));
+    }
+  }, [files, activeDepartment, activeFolder, deptFoldersMap]);
 
   // Active subfolder within the dept view (Moved to top of component)
 
@@ -1118,49 +1204,90 @@ export default function MainDashboard() {
           {/* Sub-Folder Grid */}
           {activeDepartment !== 'All files' && (
             <div>
-              <div className="flex items-center gap-3 mb-4">
-                <h3 className="text-[17px] font-bold text-[var(--text-primary)] tracking-[-0.374px]">
-                  {activeFolder ? (
-                    <button onClick={() => {
-                      const params = new URLSearchParams(searchParams);
-                      params.delete('folder');
-                      setActiveFolder(null);
-                      router.replace(`${pathname}?${params.toString()}`);
-                    }} className="flex items-center gap-2 text-[var(--accent)] hover:opacity-80 transition-opacity">
-                      <span className="text-[var(--text-tertiary)] font-medium">{activeDepartment}</span>
-                      <span className="text-[var(--text-tertiary)] opacity-20 font-normal">/</span>
-                      {activeFolder}
-                    </button>
-                  ) : activeDepartment}
-                </h3>
-                {activeFolder && (
-                  <button onClick={() => {
+              {/* Multi-level breadcrumb */}
+              <div className="flex items-center flex-wrap gap-1.5 mb-4">
+                <button
+                  onClick={() => {
                     const params = new URLSearchParams(searchParams);
                     params.delete('folder');
                     setActiveFolder(null);
                     router.replace(`${pathname}?${params.toString()}`);
-                  }} className="text-[12px] font-bold text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors uppercase tracking-wider">
+                  }}
+                  className={`text-[15px] font-bold tracking-[-0.374px] transition-colors ${
+                    !activeFolder ? 'text-[var(--text-primary)]' : 'text-[var(--accent)] hover:opacity-80'
+                  }`}
+                >
+                  {activeDepartment}
+                </button>
+                {activeFolder && activeFolder.split('/').map((seg, idx, arr) => {
+                  const segPath = arr.slice(0, idx + 1).join('/');
+                  const isLast = idx === arr.length - 1;
+                  return (
+                    <span key={segPath} className="flex items-center gap-1.5">
+                      <span className="text-[var(--text-tertiary)] opacity-40 font-normal">/</span>
+                      {isLast ? (
+                        <span className="text-[15px] font-bold text-[var(--text-primary)] tracking-[-0.374px]">{seg}</span>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            const params = new URLSearchParams(searchParams);
+                            params.set('folder', segPath);
+                            setActiveFolder(segPath);
+                            router.replace(`${pathname}?${params.toString()}`);
+                          }}
+                          className="text-[15px] font-bold text-[var(--accent)] hover:opacity-80 transition-opacity tracking-[-0.374px]"
+                        >
+                          {seg}
+                        </button>
+                      )}
+                    </span>
+                  );
+                })}
+                {activeFolder && (
+                  <button
+                    onClick={() => {
+                      // Go up one level
+                      const parts = activeFolder.split('/');
+                      const parentPath = parts.length > 1 ? parts.slice(0, -1).join('/') : null;
+                      const params = new URLSearchParams(searchParams);
+                      if (parentPath) {
+                        params.set('folder', parentPath);
+                        setActiveFolder(parentPath);
+                      } else {
+                        params.delete('folder');
+                        setActiveFolder(null);
+                      }
+                      router.replace(`${pathname}?${params.toString()}`);
+                    }}
+                    className="ml-2 text-[12px] font-bold text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors uppercase tracking-wider"
+                  >
                     ← Back
                   </button>
                 )}
               </div>
-              {!activeFolder && (
+
+              {/* Folder cards: show subfolders of current level */}
+              {dynamicFolders.length > 0 && (
                 <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-6 md:mb-8">
-                  {dynamicFolders.map(folder => {
-                    const folderCount = Array.isArray(files) ? files.filter(f => f.department === activeDepartment && f.folder === folder).length : 0;
+                  {dynamicFolders.map(folderPath => {
+                    const folderName = folderPath.split('/').pop() || folderPath;
+                    // Count files at this exact path AND files in any sub-path
+                    const folderCount = Array.isArray(files)
+                      ? files.filter(f =>
+                          f.department === activeDepartment &&
+                          (f.folder === folderPath || String(f.folder || '').startsWith(folderPath + '/'))
+                        ).length
+                      : 0;
+                    const directFileCount = Array.isArray(files)
+                      ? files.filter(f => f.department === activeDepartment && f.folder === folderPath).length
+                      : 0;
                     return (
                       <div
-                        key={folder}
-                        onDoubleClick={() => {
-                          const params = new URLSearchParams(searchParams);
-                          params.set('folder', folder);
-                          setActiveFolder(folder);
-                          router.replace(`${pathname}?${params.toString()}`);
-                        }}
+                        key={folderPath}
                         onClick={() => {
                           const params = new URLSearchParams(searchParams);
-                          params.set('folder', folder);
-                          setActiveFolder(folder);
+                          params.set('folder', folderPath);
+                          setActiveFolder(folderPath);
                           router.replace(`${pathname}?${params.toString()}`);
                         }}
                         className="group bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[14px] p-4 flex flex-col items-start gap-3 hover:border-[var(--accent)] hover:shadow-[var(--shadow-medium)] transition-all text-left cursor-pointer"
@@ -1174,9 +1301,9 @@ export default function MainDashboard() {
                               e.stopPropagation();
                               setQrFile({
                                 isFolder: true,
-                                original_name: folder,
+                                original_name: folderPath,
                                 department: activeDepartment,
-                                id: `?dept=${encodeURIComponent(activeDepartment)}&folder=${encodeURIComponent(folder)}`
+                                id: `?dept=${encodeURIComponent(activeDepartment)}&folder=${encodeURIComponent(folderPath)}`
                               });
                             }}
                             className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--bg-neutral)] transition-colors"
@@ -1186,8 +1313,11 @@ export default function MainDashboard() {
                           </button>
                         </div>
                         <div>
-                          <p className="text-[14px] font-semibold text-[var(--text-primary)] leading-tight">{folder}</p>
-                          <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">{folderCount} file{folderCount !== 1 ? 's' : ''}</p>
+                          <p className="text-[14px] font-semibold text-[var(--text-primary)] leading-tight">{folderName}</p>
+                          <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">
+                            {directFileCount} file{directFileCount !== 1 ? 's' : ''}
+                            {folderCount > directFileCount && ` · ${folderCount - directFileCount} in subfolders`}
+                          </p>
                         </div>
                       </div>
                     );
@@ -1591,39 +1721,19 @@ export default function MainDashboard() {
                   No departments are set for this Company + FY yet. Create them in <span className="font-semibold">Admin → Departments &amp; Folders</span>.
                 </div>
               )}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                  disabled={deptList.length === 0}
-                  className="w-full flex items-center justify-between bg-[#f5f5f7] border border-[rgba(0,0,0,0.08)] rounded-[11px] py-[10px] px-[16px] text-[#1d1d1f] text-[17px] tracking-[-0.374px] focus:outline focus:outline-2 focus:outline-[#0071e3] focus:bg-[#ffffff] transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {uploadDept || <span className="text-[rgba(0,0,0,0.48)]">Select Department</span>}
-                  <div className={`text-[rgba(0,0,0,0.48)] text-[12px] transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`}>▼</div>
-                </button>
-                
-                {isDropdownOpen && deptList.length > 0 && (
-                  <>
-                    <div 
-                      className="fixed inset-0 z-10" 
-                      onClick={() => setIsDropdownOpen(false)}
-                    ></div>
-                    <div className="absolute top-[calc(100%+8px)] left-0 w-full bg-[#ffffff] border border-[rgba(0,0,0,0.08)] shadow-[0_10px_30px_rgba(0,0,0,0.1)] rounded-[14px] overflow-hidden z-20 py-1 animate-in fade-in slide-in-from-top-2 duration-200">
-                      {deptList.map((dept) => (
-                        <button
-                          key={dept}
-                          onClick={() => {
-                            setUploadDept(dept);
-                            setIsDropdownOpen(false);
-                          }}
-                          className={`w-full text-left px-[16px] py-[10px] text-[17px] tracking-[-0.374px] transition-colors hover:bg-[#f5f5f7] ${uploadDept === dept ? 'text-[#0066cc] font-medium bg-[#e8f0fe] hover:bg-[#e8f0fe]' : 'text-[#1d1d1f]'}`}
-                        >
-                          {dept}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
+              <div className="relative z-50">
+                <CustomSelect
+                  value={uploadDept}
+                  onChange={(val) => {
+                    setUploadDept(String(val));
+                    setUploadFolder("");
+                  }}
+                  options={[
+                    { label: 'Select Department', value: '' },
+                    ...deptList.map(dept => ({ label: dept, value: dept }))
+                  ]}
+                  placeholder="Select Department"
+                />
               </div>
             </div>
 
@@ -1641,92 +1751,98 @@ export default function MainDashboard() {
               />
             </div>
 
-            {/* Folder Selector */}
+            {/* Folder Selector — improved UI */}
             {uploadDept && (
               <div className="mb-6">
                 <label className="block text-[14px] font-semibold text-[rgba(0,0,0,0.8)] tracking-[-0.224px] mb-2">
-                  Folder <span className="text-[rgba(0,0,0,0.32)] font-normal">(optional)</span>
+                  Destination Folder <span className="text-[rgba(0,0,0,0.32)] font-normal">(optional)</span>
                 </label>
-                <div className="flex flex-wrap gap-2 mb-3">
-                  <button
-                    type="button"
-                    onClick={() => setUploadFolder('')}
-                    className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium transition-colors ${
-                      uploadFolder === '' ? 'bg-[#007AFF] text-white' : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed]'
-                    }`}
-                  >
-                    No folder
-                  </button>
-                  {Array.from(new Set([
-                    ...(deptFoldersMap[uploadDept] || []),
-                    ...files.filter(f => f.department === uploadDept && f.folder && f.folder !== 'null' && f.folder !== 'undefined').map(f => f.folder)
-                  ])).sort().map(f => (
-                    <button
-                      key={f}
-                      type="button"
-                      onClick={() => setUploadFolder(f)}
-                      className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium transition-colors ${
-                        uploadFolder === f ? 'bg-[#007AFF] text-white' : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed]'
-                      }`}
-                    >
-                      {f}
-                    </button>
-                  ))}
+                
+                <div className="relative z-40 mb-3">
+                  <CustomSelect
+                    value={uploadFolder}
+                    onChange={(val) => setUploadFolder(String(val))}
+                    options={[
+                      { label: "No folder (Root)", value: "" },
+                      ...(() => {
+                        const allPaths = Array.from(new Set([
+                          ...(deptFoldersMap[uploadDept] || []),
+                          ...files.filter(f => f.department === uploadDept && f.folder && f.folder !== 'null' && f.folder !== 'undefined').map((f: any) => f.folder)
+                        ])).sort();
+                        return allPaths.map(f => {
+                          const depth = f.split('/').length - 1;
+                          const indent = '\u00A0\u00A0\u00A0\u00A0'.repeat(depth);
+                          return {
+                            label: `${indent}${depth > 0 ? '└ ' : ''}${f.split('/').pop()}`,
+                            value: f
+                          };
+                        });
+                      })()
+                    ]}
+                  />
                 </div>
+
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="h-[1px] flex-1 bg-[rgba(0,0,0,0.08)]"></div>
+                  <span className="text-[12px] text-[rgba(0,0,0,0.32)] font-medium uppercase tracking-wider">OR</span>
+                  <div className="h-[1px] flex-1 bg-[rgba(0,0,0,0.08)]"></div>
+                </div>
+
                 <input
                   type="text"
-                  placeholder="Or type a new folder name..."
+                  placeholder="Create a new folder path (e.g. Reports/2024/Q1)"
                   value={uploadFolder}
                   onChange={(e) => setUploadFolder(e.target.value)}
-                  className="w-full bg-white border border-[#d2d2d7] rounded-[8px] px-3 py-2 text-[13px] text-[#1d1d1f] placeholder:text-[#86868b] outline-none focus:border-[#0071e3] focus:ring-1 focus:ring-[#0071e3] transition-colors"
+                  className="w-full bg-[#f5f5f7] border border-transparent rounded-[11px] px-[16px] py-[10px] text-[15px] text-[#1d1d1f] placeholder:text-[#86868b] outline-none focus:border-[#007AFF] focus:bg-white transition-all"
                 />
               </div>
             )}
 
-            {/* Drag & Drop Upload Zone */}
-            <label
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              className={`w-full flex flex-col items-center justify-center py-9 sm:py-12 px-4 sm:px-6 border-[3px] border-dashed rounded-[16px] transition-colors ${
+            {/* Upload Zone: Single combined area */}
+            <div className="flex gap-2 mb-3">
+              <label className={`flex-1 flex flex-col items-center justify-center py-10 px-4 border-[3px] border-dashed rounded-[16px] transition-colors cursor-pointer ${
                 uploading ? 'bg-[#f5f5f7] border-[rgba(0,0,0,0.08)] opacity-60 cursor-wait'
-                : isDragging ? 'bg-[#e8f2ff] border-[#0071e3] cursor-copy' 
-                : 'bg-[#fafafc] border-[#d2d2d7] hover:bg-[#f5f5f7] cursor-pointer'
+                : isDragging ? 'bg-[#e8f2ff] border-[#0071e3]'
+                : 'bg-[#fafafc] border-[#d2d2d7] hover:bg-[#f5f5f7]'
               }`}
-            >
-              <input 
-                type="file" 
-                multiple
-                className="sr-only" 
-                onChange={handleFileInput}
-                disabled={uploading || mediaDown}
-              />
-              {uploading ? (
-                <div className="w-full flex flex-col items-center">
-                  <p className="text-[13px] font-medium tracking-[-0.08px] text-[#1d1d1f] mb-3">
-                    {uploadText} {uploadProgress > 0 && uploadProgress < 100 ? `${uploadProgress}%` : ''}
-                  </p>
-                  <div className="w-full max-w-[240px] h-[6px] bg-[rgba(0,0,0,0.06)] rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-[#007AFF] transition-all duration-300 ease-out rounded-full"
-                      style={{ width: `${uploadProgress}%` }}
-                    />
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+              >
+                <input
+                  type="file"
+                  multiple
+                  className="sr-only"
+                  onChange={handleFileInput}
+                  disabled={uploading || mediaDown}
+                />
+                {uploading ? (
+                  <div className="w-full flex flex-col items-center">
+                    <p className="text-[13px] font-medium tracking-[-0.08px] text-[#1d1d1f] mb-3">
+                      {uploadText} {uploadProgress > 0 && uploadProgress < 100 ? `${uploadProgress}%` : ''}
+                    </p>
+                    <div className="w-full max-w-[240px] h-[6px] bg-[rgba(0,0,0,0.06)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[#007AFF] transition-all duration-300 ease-out rounded-full"
+                        style={{ width: `${uploadProgress}%` }}
+                      />
+                    </div>
                   </div>
-                </div>
-              ) : (
-                <>
-                  <div className="w-14 h-14 rounded-full bg-[#ffffff] flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.04)] mb-4 border border-[rgba(0,0,0,0.04)]">
-                    <CloudUpload className="text-[#0066cc]" size={28} strokeWidth={2} />
-                  </div>
-                  <p className="text-[17px] font-semibold tracking-[-0.374px] text-[#1d1d1f] mb-1">
-                    Drag & Drop your file here
-                  </p>
-                  <p className="text-[15px] font-normal tracking-[-0.24px] text-[rgba(0,0,0,0.48)]">
-                    or click to browse
-                  </p>
-                </>
-              )}
-            </label>
+                ) : (
+                  <>
+                    <div className="w-14 h-14 rounded-full bg-[#ffffff] flex items-center justify-center shadow-[0_2px_8px_rgba(0,0,0,0.04)] mb-4 border border-[rgba(0,0,0,0.04)]">
+                      <CloudUpload className="text-[#0071e3]" size={28} strokeWidth={2} />
+                    </div>
+                    <p className="text-[17px] font-semibold tracking-[-0.374px] text-[#1d1d1f] mb-1">
+                      Drag & Drop files or folders here
+                    </p>
+                    <p className="text-[15px] font-normal tracking-[-0.24px] text-[rgba(0,0,0,0.48)]">
+                      or click to browse files
+                    </p>
+                  </>
+                )}
+              </label>
+            </div>
           </div>
         </div>
       )}

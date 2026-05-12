@@ -35,11 +35,12 @@ export default function CompaniesAdminPage() {
   const [alert, setAlert] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [formCompany, setFormCompany] = useState({ name: '', type: 'Independent', parent_company_id: '', storage_quota_gb: 5 });
-  const [formFy, setFormFy] = useState({ name: '', start_date: '', end_date: '', status: 'Planned' });
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
   const [editCompany, setEditCompany] = useState({ name: '', type: 'Independent', parent_company_id: '', storage_quota_gb: 5 });
   const [editingFyId, setEditingFyId] = useState<number | null>(null);
   const [editFy, setEditFy] = useState({ name: '', start_date: '', end_date: '', status: 'Planned' });
+  const [fyAutoSync, setFyAutoSync] = useState<boolean | null>(null);
+  const [fyToggleBusy, setFyToggleBusy] = useState(false);
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
 
@@ -80,6 +81,28 @@ export default function CompaniesAdminPage() {
   useEffect(() => { if (authorized) loadCompanies(); }, [authorized]);
   useEffect(() => { if (selectedCompanyId) loadFYs(selectedCompanyId); }, [selectedCompanyId]);
 
+  // Load FY auto-sync setting
+  useEffect(() => {
+    if (!authorized || !token) return;
+    fetch(apiUrl('/api/admin/fy-auto-sync'), { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => setFyAutoSync(d.enabled ?? true))
+      .catch(() => setFyAutoSync(true));
+  }, [authorized]);
+
+  const toggleFyAutoSync = async () => {
+    if (!token) return;
+    setFyToggleBusy(true);
+    const res = await fetch(apiUrl('/api/admin/fy-auto-sync'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ enabled: !fyAutoSync }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) setFyAutoSync(data.enabled);
+    else setAlert((data as any).error || 'Failed to update setting');
+    setFyToggleBusy(false);
+  };
   const selectedCompany = useMemo(() => companies.find(c => c.id === selectedCompanyId) || null, [companies, selectedCompanyId]);
 
   const createCompany = async (e: React.FormEvent) => {
@@ -103,24 +126,6 @@ export default function CompaniesAdminPage() {
     setBusy(false);
   };
 
-  const createFY = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!token || !selectedCompanyId) return;
-    setBusy(true);
-    const res = await fetch(apiUrl('/api/financial-years'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        company_id: selectedCompanyId,
-        ...formFy
-      })
-    });
-    const data = await res.json();
-    if (!res.ok) { setBusy(false); return setAlert(data.error || 'Failed to create FY'); }
-    setFormFy({ name: '', start_date: '', end_date: '', status: 'Planned' });
-    await loadFYs(selectedCompanyId);
-    setBusy(false);
-  };
 
   const startEditCompany = (c: Company) => {
     setEditingCompanyId(c.id);
@@ -259,25 +264,31 @@ export default function CompaniesAdminPage() {
           <input type="number" min={1} value={formCompany.storage_quota_gb} onChange={e => setFormCompany(p => ({ ...p, storage_quota_gb: Number(e.target.value) }))} placeholder="Storage Quota GB" className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
           <button disabled={busy} className="mt-1 py-2.5 rounded-[12px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[14px] font-bold disabled:opacity-60">Create Company</button>
         </form>
+      </div>
 
-        <form onSubmit={createFY} className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] p-5 sm:p-6 flex flex-col gap-3 shadow-sm">
-          <h2 className="text-[15px] font-bold text-[var(--text-primary)] flex items-center gap-2"><CalendarRange size={16} className="text-[var(--accent)]" /> Create Financial Year</h2>
-          <select value={selectedCompanyId || ''} onChange={e => setSelectedCompanyId(Number(e.target.value))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]">
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <input required value={formFy.name} onChange={e => setFormFy(p => ({ ...p, name: e.target.value }))} placeholder="FY 2026-27" className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
-          <div className="grid grid-cols-2 gap-2">
-            <input required type="date" value={formFy.start_date} onChange={e => setFormFy(p => ({ ...p, start_date: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
-            <input required type="date" value={formFy.end_date} onChange={e => setFormFy(p => ({ ...p, end_date: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
-          </div>
-          <select value={formFy.status} onChange={e => setFormFy(p => ({ ...p, status: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]">
-            <option>Planned</option>
-            <option>Active</option>
-            <option>Archived</option>
-            <option>Locked</option>
-          </select>
-          <button disabled={busy} className="mt-1 py-2.5 rounded-[12px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[14px] font-bold disabled:opacity-60">Create FY</button>
-        </form>
+
+      {/* FY Auto-Sync Toggle */}
+      <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm">
+        <div>
+          <h2 className="text-[15px] font-bold text-[var(--text-primary)] flex items-center gap-2">
+            <CalendarRange size={16} className="text-[var(--accent)]" /> Financial Year Auto-Sync
+          </h2>
+          <p className="text-[12px] text-[var(--text-secondary)] mt-1">
+            When enabled, the system automatically detects the current Indian FY (Apr 1 → Mar 31) and creates/activates it for all companies at startup and every night at 2:00 AM. Past FYs are archived automatically.
+          </p>
+        </div>
+        <button
+          onClick={toggleFyAutoSync}
+          disabled={fyToggleBusy || fyAutoSync === null}
+          className={`flex-shrink-0 flex items-center gap-3 px-4 py-2.5 rounded-[12px] text-[13px] font-bold transition-all border ${
+            fyAutoSync
+              ? 'bg-[#34c75910] border-[#34c75940] text-[#34c759] hover:bg-[#34c75920]'
+              : 'bg-[var(--bg-neutral)] border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)]'
+          } disabled:opacity-50`}
+        >
+          <span className={`w-2 h-2 rounded-full ${fyAutoSync ? 'bg-[#34c759]' : 'bg-[var(--text-tertiary)]'}`} />
+          {fyToggleBusy ? 'Saving...' : fyAutoSync ? 'Auto-Sync ON' : 'Auto-Sync OFF'}
+        </button>
       </div>
 
       <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] overflow-hidden shadow-sm">

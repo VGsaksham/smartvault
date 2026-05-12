@@ -24,6 +24,31 @@ textarea {
   -webkit-tap-highlight-color: transparent;
 }
 
+/* Global Select Default Styling */
+select:not([multiple]) {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-color: var(--bg-neutral);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 8px 14px;
+  padding-right: 36px !important;
+  font-size: 14px;
+  color: var(--text-primary);
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='2' stroke='rgba(0,0,0,0.56)' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 12px center;
+  background-repeat: no-repeat;
+  background-size: 16px 16px;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+select:not([multiple]):focus {
+  border-color: var(--accent);
+}
+
 :focus:not(:focus-visible) {
   outline: none;
 }
@@ -127,6 +152,10 @@ html.dark textarea {
   color: var(--text-primary) !important;
   border: 1px solid var(--border-default) !important;
   box-shadow: none !important;
+}
+
+html.dark select:not([multiple]) {
+  background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='2' stroke='rgba(255,255,255,0.56)' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
 }
 
 html.dark input::placeholder {

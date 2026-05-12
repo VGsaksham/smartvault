@@ -4,6 +4,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { UserPlus, Trash2, RefreshCw, X, Copy } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
+import { CustomSelect } from '@/components/ui/Select';
 
 type User = {
   id: number; username: string; email: string;
@@ -643,13 +644,16 @@ function UsersPageContent() {
 
             <div className="overflow-y-auto">
             <div className="px-8 py-6 grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <div className="space-y-2">
+              <div className="space-y-2 z-40">
                 <label className="block text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.08em]">Role</label>
-                <select value={detailRole} onChange={(e) => setDetailRole(e.target.value as User['role'])}
-                  className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[12px] py-3 px-4 text-[16px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]">
-                  {detailRole === 'Admin' && <option value="Admin">Admin</option>}
-                  {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
+                <CustomSelect
+                  value={detailRole}
+                  onChange={(val) => setDetailRole(val as User['role'])}
+                  options={[
+                    ...(detailRole === 'Admin' ? [{ label: 'Admin', value: 'Admin' }] : []),
+                    ...ROLES.map(r => ({ label: r, value: r }))
+                  ]}
+                />
               </div>
               <div className="sm:col-span-2 space-y-2">
                 <label className="block text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.08em]">Status</label>
@@ -882,64 +886,49 @@ function UsersPageContent() {
                     className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] py-2.5 px-4 text-[14px] text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)]/50 focus:outline-none focus:border-[var(--accent)] focus:bg-[var(--bg-surface)] transition-all"/>
                 </div>
               ))}
-              <div className="grid grid-cols-2 gap-3">
-                {[{label:'Department',key:'department',opts:departments},{label:'Role',key:'role',opts:[...ROLES]}].map(f => (
-                  <div key={f.key}>
-                    <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">{f.label}</label>
-                    <select value={(form as any)[f.key]} onChange={e => setForm(p => ({...p, [f.key]: e.target.value}))}
-                      className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] py-2.5 px-4 text-[14px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] transition-all">
-                      {f.opts.map(o => <option key={o} value={o}>{o}</option>)}
-                    </select>
-                  </div>
-                ))}
-              </div>
               <div>
-                <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Primary Company</label>
-                <select
-                  required
+                <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Company</label>
+                <CustomSelect
                   value={(form as any).primary_company_id}
-                  onChange={e => setForm(p => ({...p, primary_company_id: e.target.value}))}
-                  className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] py-2.5 px-4 text-[14px] text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] transition-all"
-                >
-                  <option value="">Select company</option>
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
+                  onChange={async (val) => {
+                    setForm(p => ({...p, primary_company_id: val}));
+                    const cid = Number(val);
+                    if (cid) {
+                      const depts = await fetchCompanyDepartments(cid);
+                      if (depts && depts.length > 0) {
+                        setForm(p => ({...p, department: depts[0]}));
+                      } else {
+                        setForm(p => ({...p, department: ''}));
+                      }
+                    }
+                  }}
+                  options={[
+                    { label: 'Select company', value: '' },
+                    ...companies.map(c => ({ label: c.name, value: c.id.toString() }))
+                  ]}
+                  placeholder="Select company"
+                />
               </div>
 
-              <div className="rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-elevated)]/30 p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest">Additional Company Access</p>
-                  <span className="text-[10px] text-[var(--text-tertiary)]">Optional</span>
+              <div className="grid grid-cols-2 gap-3 z-40">
+                <div>
+                  <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Department</label>
+                  <CustomSelect 
+                    value={(form as any).department} 
+                    onChange={val => setForm(p => ({...p, department: val}))}
+                    options={(((form as any).primary_company_id && companyDeptOptions[Number((form as any).primary_company_id)]) 
+                      ? companyDeptOptions[Number((form as any).primary_company_id)]
+                      : departments).map(o => ({ label: o, value: o }))
+                    }
+                  />
                 </div>
-                <select
-                  defaultValue=""
-                  onChange={(e) => {
-                    if (!e.target.value) return;
-                    promptCreateCompanyAccess(e.target.value);
-                    e.currentTarget.value = '';
-                  }}
-                  className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] py-2 px-3 text-[12px] text-[var(--text-primary)]"
-                >
-                  <option value="">Add company...</option>
-                  {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-                <div className="mt-2 flex flex-col gap-1.5">
-                  {createCompanyAccess.length === 0 ? (
-                    <div className="text-[11px] text-[var(--text-tertiary)]">No extra company access set.</div>
-                  ) : createCompanyAccess.map((ca, idx) => (
-                    <div key={`${ca.company_id}-${ca.department}-${idx}`} className="flex items-center gap-2 text-[11px]">
-                      <span className="font-semibold text-[var(--text-primary)]">{ca.company_name || `Company ${ca.company_id}`}</span>
-                      <span className="text-[var(--text-secondary)]">{ca.department}</span>
-                      <span className="text-[var(--text-tertiary)]">{ca.can_upload ? 'Upload' : 'Read only'}</span>
-                      <button
-                        type="button"
-                        onClick={() => setCreateCompanyAccess((prev) => prev.filter((_, i) => i !== idx))}
-                        className="ml-auto text-[#ff5b52]"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
+                <div>
+                  <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Role</label>
+                  <CustomSelect 
+                    value={(form as any).role} 
+                    onChange={val => setForm(p => ({...p, role: val}))}
+                    options={ROLES.map(o => ({ label: o, value: o }))}
+                  />
                 </div>
               </div>
               <div className="flex gap-2 pt-2">

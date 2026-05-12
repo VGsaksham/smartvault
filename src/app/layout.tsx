@@ -1,15 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
-import { Suspense } from "react";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
-import TopBar from "@/components/TopBar";
-import ThemeProvider from "@/components/ThemeProvider";
-import { SidebarProvider } from "@/context/SidebarContext";
-import { ConfirmProvider } from "@/components/ConfirmProvider";
-import AuthHeartbeat from "@/components/AuthHeartbeat";
 
-// Inter is the closest open-source equivalent to SF Pro
 const inter = Inter({
   subsets: ["latin"],
   variable: "--font-inter",
@@ -28,6 +20,9 @@ export const viewport = {
   userScalable: false,
 };
 
+// Root layout is intentionally minimal.
+// The full app shell (Sidebar, TopBar, Auth) lives in (app)/layout.tsx.
+// Preview and Login pages get their own isolated layouts with no navigation.
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -43,32 +38,8 @@ export default function RootLayout({
         <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)" />
         <meta name="theme-color" content="#0f0f10" media="(prefers-color-scheme: dark)" />
       </head>
-      <body
-        className={`${inter.variable} font-sans antialiased bg-[var(--bg-app)] text-[var(--text-primary)] text-[17px] leading-[1.44] tracking-[-0.01em] selection:bg-[var(--accent)] selection:text-white`}
-      >
-        <ThemeProvider>
-          <ConfirmProvider>
-            <SidebarProvider>
-            <div className="flex h-dvh min-h-0 overflow-hidden">
-              {/* Sidebar — fixed on desktop, overlay on mobile */}
-              <Suspense fallback={<div className="hidden md:block w-64 bg-[var(--bg-surface)] border-r border-[var(--border-subtle)]" />}>
-                <Sidebar />
-              </Suspense>
-
-              {/* Main content area — full width on mobile, offset on desktop */}
-              <div className="flex-1 flex flex-col min-w-0 md:pl-64">
-                <Suspense fallback={<div className="h-[52px] w-full bg-[var(--bg-surface)] border-b border-[var(--border-subtle)]" />}>
-                  <TopBar />
-                </Suspense>
-                <AuthHeartbeat />
-                <main className="flex-1 overflow-y-auto mt-[52px] relative min-w-0">
-                  {children}
-                </main>
-              </div>
-            </div>
-            </SidebarProvider>
-          </ConfirmProvider>
-        </ThemeProvider>
+      <body className={`${inter.variable} font-sans antialiased`}>
+        {children}
       </body>
     </html>
   );
