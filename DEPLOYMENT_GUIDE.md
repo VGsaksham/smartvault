@@ -311,11 +311,15 @@ bash scripts/db-migrate.sh
 npm run preflight
 ```
 
-> **Note:** `npm run preflight` only checks that connections are working. It does **NOT** create the admin user automatically.
+> **Note:** `npm run preflight` only checks that connections are working. It does **NOT** create users. For the first Admin account, either use **Step 6.0** (bootstrap on API startup) or **Step 6.1** (manual SQL/script).
 
-### Step 6.1 — Create the First Admin User (Required)
+### Step 6.0 — First Admin via bootstrap (optional)
 
-The `ADMIN_BOOTSTRAP_ENABLED` flag in `.env` does nothing — the admin account must be manually injected into the database. Run this command, replacing the email and password with the credentials you want to use to log in:
+If your backend `.env` includes **`ADMIN_BOOTSTRAP_ENABLED=true`** plus **`ADMIN_BOOTSTRAP_EMAIL`** and **`ADMIN_BOOTSTRAP_PASSWORD`**, the API creates that Admin user on startup **when that email is not already registered**. Check logs for `[Startup] Bootstrap admin created:` or `skipped`. After first login, set **`ADMIN_BOOTSTRAP_ENABLED=false`** and restart the API. If bootstrap is disabled or email/password are missing, use Step 6.1 instead.
+
+### Step 6.1 — Create the First Admin User (manual alternative)
+
+If you are not using bootstrap, inject the admin account manually. Run this command, replacing the email and password with the credentials you want to use to log in:
 
 ```bash
 cd /opt/smartvault/smartvault-api
@@ -1099,8 +1103,8 @@ After start:
 
 ### 5.2.4 First boot checklist (very important)
 
-1. Set `ADMIN_BOOTSTRAP_ENABLED=true`.
-2. Start API once and verify admin creation in logs.
+1. Set `ADMIN_BOOTSTRAP_ENABLED=true` **and** `ADMIN_BOOTSTRAP_EMAIL` / `ADMIN_BOOTSTRAP_PASSWORD` (bootstrap skips if these are empty).
+2. Start API once and verify admin creation in logs (`[Startup] Bootstrap admin created:`).
 3. Login with bootstrap admin credentials.
 4. Immediately change password in app.
 5. Set `ADMIN_BOOTSTRAP_ENABLED=false`.
@@ -1245,6 +1249,8 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        # Required for Bearer JWT from the browser (if missing, APIs return 401 and the UI may redirect to /login)
+        proxy_set_header Authorization $http_authorization;
     }
 }
 ```
@@ -1692,17 +1698,42 @@ POST http://192.168.1.104:5005/api/auth/login [HTTP/1.1 400 Bad Request]
 
 ---
 
-### 11.9 `ADMIN_BOOTSTRAP_ENABLED` does nothing
+### 11.9 Bootstrap admin vs preflight
 
-**Symptom:** You set `ADMIN_BOOTSTRAP_ENABLED=true` in `.env` and ran `preflight`, but still can't log in.
+**Symptom:** You set `ADMIN_BOOTSTRAP_ENABLED=true` and ran `npm run preflight`, but still cannot log in.
 
-**Cause:** The `ADMIN_BOOTSTRAP_ENABLED` variable is not referenced anywhere in the backend code. It is a dead variable that has no effect. The `npm run preflight` script only checks connectivity — it never creates users.
+**Cause:** **`preflight` never creates users** — it only tests DB, paths, and MinIO. Admin bootstrap runs only when the **API process starts** (`server.js` calls `bootstrapAdminIfConfigured` after listen). You must also set **`ADMIN_BOOTSTRAP_EMAIL`** and **`ADMIN_BOOTSTRAP_PASSWORD`**, then **start or restart** the API and watch logs for `[Startup] Bootstrap admin created:`.
 
-**Fix:** Use the manual admin creation script in **Step 6.1**.
+**Fix:** Restart the API after setting bootstrap env vars, or use the manual script in **Step 6.1**.
 
 ---
 
-### 11.10 `/api/api/auth/login` double-API in the URL
+### 11.10 Admin pages: department dropdown empty (production only)
+
+**Symptom:** Under **Admin → Users**, the Department field has no options, or **Departments & Folders** looks wrong, while local dev works.
+
+**Cause (most common):** Managed departments come from **`company_departments`** for a specific **company + financial year**. On a **fresh server** there are no files yet, so the fallback list built only from `vault_files` is empty. If **`/admin/users`** loads **before** the URL includes **`companyId` and `fyId`** (e.g. bookmark or slow network), the first **`/api/search/options`** request may run **without** that scope and return an empty department list until you refresh or wait for the top bar to sync the query string.
+
+**Fix:**
+
+1. In **Admin → Departments & Folders**, select **Company** and **FY** (URL should include `?companyId=&fyId=`) and **create at least one department** for that FY.
+2. Ensure **Admin → Companies & FY** has at least one **financial year** for the company (otherwise there is no FY id to attach departments to).
+3. Prefer navigating from **Admin Dashboard** tiles so **companyId/fyId** stay in the query string.
+
+---
+
+### 11.11 Page “reloads” or jumps to login after an action
+
+**Symptom:** After creating a user or switching views, the whole page seems to reload, or you end up on **/login**.
+
+**Likely causes:**
+
+1. **Expected behavior:** Creating a user runs **`fetchUsers()`** again (list refresh). The **top bar** may run **`router.replace`** to add `companyId`/`fyId` to the URL — that is a client navigation, not necessarily a bug.
+2. **Redirect to login:** **`AuthHeartbeat`** and **`TopBar`** call **`window.location.href = '/login'`** when **`/api/companies`**, **`/api/financial-years`**, or **`/api/auth/heartbeat`** returns **401** or **403**. Fix JWT expiry, wrong **`JWT_SECRET`** (token issued before secret change), or nginx not forwarding **`Authorization`** (see **Part 7.4** — `proxy_set_header Authorization $http_authorization;` on `/api/`).
+
+---
+
+### 11.12 `/api/api/auth/login` double-API in the URL
 
 **Symptom:**
 ```

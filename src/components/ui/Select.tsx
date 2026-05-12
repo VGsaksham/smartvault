@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 
 export interface SelectOption {
   label: string;
@@ -18,29 +19,111 @@ interface SelectProps {
 
 export function CustomSelect({ value, onChange, options, placeholder = 'Select...', className = '', disabled = false }: SelectProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({});
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  // Position the portal dropdown below (or above if near bottom) the trigger
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const winH = window.innerHeight;
+    const maxH = 220;
+    const spaceBelow = winH - rect.bottom - 8;
+    const spaceAbove = rect.top - 8;
+
+    if (spaceBelow >= Math.min(maxH, 120) || spaceBelow >= spaceAbove) {
+      // Open downward
+      setDropdownStyle({
+        position: 'fixed',
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        maxHeight: Math.max(spaceBelow, 80),
+        zIndex: 99999,
+      });
+    } else {
+      // Open upward
+      setDropdownStyle({
+        position: 'fixed',
+        bottom: winH - rect.top + 4,
+        left: rect.left,
+        width: rect.width,
+        maxHeight: Math.max(spaceAbove, 80),
+        zIndex: 99999,
+      });
+    }
+  }, []);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+    if (!isOpen) return;
+    updatePosition();
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
+    return () => {
+      window.removeEventListener('scroll', updatePosition, true);
+      window.removeEventListener('resize', updatePosition);
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
+  }, [isOpen, updatePosition]);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        triggerRef.current?.contains(e.target as Node) ||
+        listRef.current?.contains(e.target as Node)
+      ) return;
+      setIsOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
 
   const selectedOption = options.find(opt => String(opt.value) === String(value));
 
+  const dropdown = isOpen ? (
+    <div
+      ref={listRef}
+      style={dropdownStyle}
+      className="bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] rounded-[11px] overflow-y-auto py-1 animate-in fade-in slide-in-from-top-1 duration-150"
+    >
+      {options.length === 0 ? (
+        <div className="px-4 py-2 text-[13px] text-[var(--text-tertiary)] italic">No options</div>
+      ) : (
+        options.map((opt) => (
+          <button
+            key={opt.value}
+            type="button"
+            onMouseDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onChange(opt.value);
+              setIsOpen(false);
+            }}
+            className={`w-full text-left px-[14px] py-[9px] text-[14px] tracking-[-0.224px] transition-colors hover:bg-[var(--bg-neutral)] ${
+              String(value) === String(opt.value)
+                ? 'text-[var(--accent)] font-medium bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)]'
+                : 'text-[var(--text-primary)]'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))
+      )}
+    </div>
+  ) : null;
+
   return (
-    <div className={`relative ${className}`} ref={dropdownRef}>
+    <div className={`relative ${className}`}>
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setIsOpen(!isOpen);
+          setIsOpen(prev => !prev);
         }}
         className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] py-2.5 px-4 text-[14px] text-left text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)] transition-all flex items-center justify-between disabled:opacity-50"
       >
@@ -52,29 +135,7 @@ export function CustomSelect({ value, onChange, options, placeholder = 'Select..
         </svg>
       </button>
 
-      {isOpen && (
-        <div className="absolute top-[calc(100%+4px)] left-0 w-full min-w-[120px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] rounded-[11px] overflow-hidden z-[9999] py-1 animate-in fade-in slide-in-from-top-1 duration-200 max-h-[250px] overflow-y-auto">
-          {options.length === 0 ? (
-            <div className="px-4 py-2 text-[13px] text-[var(--text-tertiary)] italic">No options</div>
-          ) : (
-            options.map((opt) => (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onChange(opt.value);
-                  setIsOpen(false);
-                }}
-                className={`w-full text-left px-[14px] py-[8px] text-[14px] tracking-[-0.224px] transition-colors hover:bg-[var(--bg-neutral)] ${String(value) === String(opt.value) ? 'text-[var(--accent)] font-medium bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)]' : 'text-[var(--text-primary)]'}`}
-              >
-                {opt.label}
-              </button>
-            ))
-          )}
-        </div>
-      )}
+      {typeof document !== 'undefined' && createPortal(dropdown, document.body)}
     </div>
   );
 }
