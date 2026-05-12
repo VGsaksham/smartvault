@@ -346,6 +346,91 @@ async function restoreBackup(pool, backupId) {
     const currentRecords = await fetchVaultSnapshotFromDb(client);
     const preview = buildChangesSummary(snapshotRecords, currentRecords);
 
+    // --- Pre-flight validation start ---
+    // Validate that all Companies, FYs, Departments, and Folders still exist.
+    const requiredCompanies = new Set();
+    const requiredFys = new Set();
+    const requiredDepts = new Map(); // key: "compId:fyId:deptName", value: { compId, fyId, deptName }
+    const requiredFolders = new Map(); // key: "deptId:folderPath", value: { deptId, folderPath, deptName }
+
+    for (const record of snapshotRecords) {
+      const metadata = record.metadata || {};
+      const file = record.file || {};
+      const compId = metadata.company_id;
+      const fyId = metadata.fy_id;
+      const deptName = file.department;
+      const folderPath = file.folder;
+
+      if (compId) requiredCompanies.add(compId);
+      if (fyId) requiredFys.add(fyId);
+      if (compId && fyId && deptName) {
+        const deptKey = `${compId}:${fyId}:${deptName}`;
+        requiredDepts.set(deptKey, { compId, fyId, deptName });
+        
+        if (folderPath && folderPath !== 'null' && folderPath !== 'undefined') {
+          // We will check folders after verifying departments, so we store the folder paths
+          requiredFolders.set(`${deptKey}::${folderPath}`, { compId, fyId, deptName, folderPath });
+        }
+      }
+    }
+
+    // 1. Check Companies
+    if (requiredCompanies.size > 0) {
+      const res = await client.query('SELECT id, name FROM companies WHERE id = ANY($1)', [Array.from(requiredCompanies)]);
+      const found = new Set(res.rows.map(r => r.id));
+      for (const id of requiredCompanies) {
+        if (!found.has(id)) throw new Error(`Cannot restore backup: Required Company (ID: ${id}) is missing from the database.`);
+      }
+    }
+
+    // 2. Check Financial Years
+    if (requiredFys.size > 0) {
+      const res = await client.query('SELECT id, name FROM financial_years WHERE id = ANY($1)', [Array.from(requiredFys)]);
+      const found = new Set(res.rows.map(r => r.id));
+      for (const id of requiredFys) {
+        if (!found.has(id)) throw new Error(`Cannot restore backup: Required Financial Year (ID: ${id}) is missing from the database.`);
+      }
+    }
+
+    // 3. Check Departments and get their IDs
+    const deptIdMap = new Map(); // deptKey -> deptId
+    for (const { compId, fyId, deptName } of requiredDepts.values()) {
+      const res = await client.query(
+        'SELECT id FROM company_departments WHERE company_id = $1 AND fy_id = $2 AND LOWER(name) = LOWER($3)',
+        [compId, fyId, deptName]
+      );
+      if (res.rows.length === 0) {
+        throw new Error(`Cannot restore backup: Required Department '${deptName}' is missing.`);
+      }
+      deptIdMap.set(`${compId}:${fyId}:${deptName}`, res.rows[0].id);
+    }
+
+    // 4. Check Folders
+    for (const { compId, fyId, deptName, folderPath } of requiredFolders.values()) {
+      const deptKey = `${compId}:${fyId}:${deptName}`;
+      const deptId = deptIdMap.get(deptKey);
+      if (!deptId) continue; // Should be caught above
+      
+      const parts = folderPath.split('/').map(p => p.trim()).filter(Boolean);
+      let parentId = null;
+      for (const part of parts) {
+        let query, params;
+        if (parentId === null) {
+          query = 'SELECT id FROM company_department_folders WHERE department_id = $1 AND parent_folder_id IS NULL AND LOWER(name) = LOWER($2)';
+          params = [deptId, part];
+        } else {
+          query = 'SELECT id FROM company_department_folders WHERE department_id = $1 AND parent_folder_id = $2 AND LOWER(name) = LOWER($3)';
+          params = [deptId, parentId, part];
+        }
+        const folderRes = await client.query(query, params);
+        if (folderRes.rows.length === 0) {
+          throw new Error(`Cannot restore backup: Required folder path '${folderPath}' in Department '${deptName}' is missing.`);
+        }
+        parentId = folderRes.rows[0].id;
+      }
+    }
+    // --- Pre-flight validation end ---
+
     const snapshotById = new Map(snapshotRecords.map((r) => [Number(r.file.id), r]));
     const currentById = new Map(currentRecords.map((r) => [Number(r.file.id), r]));
     const schemaColsResult = await client.query(

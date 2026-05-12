@@ -31,13 +31,47 @@ async function ensureCompanyStructureSchema(db = pool) {
     CREATE TABLE IF NOT EXISTS company_department_folders (
       id SERIAL PRIMARY KEY,
       department_id INTEGER NOT NULL REFERENCES company_departments(id) ON DELETE CASCADE,
+      parent_folder_id INTEGER REFERENCES company_department_folders(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+  // Add parent_folder_id column if it doesn't exist (migration for existing installs)
+  await db.query(`
+    ALTER TABLE company_department_folders
+    ADD COLUMN IF NOT EXISTS parent_folder_id INTEGER REFERENCES company_department_folders(id) ON DELETE CASCADE;
+  `).catch(() => {});
   await db.query(`CREATE INDEX IF NOT EXISTS idx_company_department_folders_dept ON company_department_folders(department_id);`);
-  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_company_department_folders_unique_name ON company_department_folders(department_id, LOWER(name));`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_company_department_folders_parent ON company_department_folders(parent_folder_id);`);
+}
+
+// Build full path string for a folder by walking ancestors
+async function getFolderFullPath(db, folderId) {
+  const parts = [];
+  let currentId = folderId;
+  const visited = new Set();
+  while (currentId) {
+    if (visited.has(currentId)) break; // cycle guard
+    visited.add(currentId);
+    const r = await db.query(`SELECT id, name, parent_folder_id FROM company_department_folders WHERE id = $1`, [currentId]);
+    if (r.rows.length === 0) break;
+    parts.unshift(r.rows[0].name);
+    currentId = r.rows[0].parent_folder_id;
+  }
+  return parts.join('/');
+}
+
+// Build a nested tree from flat folder rows
+function buildFolderTree(rows, parentId = null) {
+  return rows
+    .filter(r => (r.parent_folder_id || null) === parentId)
+    .map(r => ({
+      id: r.id,
+      name: r.name,
+      parent_folder_id: r.parent_folder_id || null,
+      children: buildFolderTree(rows, r.id)
+    }));
 }
 
 function bad(res, msg) {
@@ -57,21 +91,29 @@ router.get('/structure', verifyToken, async (req, res) => {
        ORDER BY LOWER(name) ASC`,
       [companyId, fyId]
     );
-    const folderRows = await pool.query(
-      `SELECT id, department_id, name FROM company_department_folders
-       WHERE department_id = ANY($1::int[])
-       ORDER BY LOWER(name) ASC`,
-      [deptRows.rows.map((d) => d.id)]
-    ).catch(() => ({ rows: [] }));
+    const deptIds = deptRows.rows.map((d) => d.id);
+    const folderRows = deptIds.length > 0
+      ? await pool.query(
+          `SELECT id, department_id, parent_folder_id, name FROM company_department_folders
+           WHERE department_id = ANY($1::int[])
+           ORDER BY LOWER(name) ASC`,
+          [deptIds]
+        ).catch(() => ({ rows: [] }))
+      : { rows: [] };
     const byDept = new Map();
     for (const f of folderRows.rows) {
       if (!byDept.has(f.department_id)) byDept.set(f.department_id, []);
-      byDept.get(f.department_id).push({ id: f.id, name: f.name });
+      byDept.get(f.department_id).push(f);
     }
     res.json({
       company_id: companyId,
       fy_id: fyId,
-      departments: deptRows.rows.map((d) => ({ id: d.id, name: d.name, folders: byDept.get(d.id) || [] })),
+      departments: deptRows.rows.map((d) => ({
+        id: d.id,
+        name: d.name,
+        // flat list of all folders (frontend builds tree)
+        folders: (byDept.get(d.id) || []).map(f => ({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null })),
+      })),
     });
   } catch (err) {
     res.status(500).json({ error: `Failed to load structure: ${err.message}` });
@@ -190,20 +232,56 @@ router.post('/structure/departments/:id/folders', verifyToken, async (req, res) 
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
   const deptId = Number(req.params.id);
   const name = String(req.body.name || '').trim();
+  const parentFolderId = req.body.parent_folder_id ? Number(req.body.parent_folder_id) : null;
   if (!Number.isFinite(deptId) || !name) return bad(res, 'name is required.');
   try {
     await ensureCompanyStructureSchema(pool);
     const created = await pool.query(
-      `INSERT INTO company_department_folders (department_id, name)
-       VALUES ($1, $2)
-       RETURNING id, name`,
-      [deptId, name]
+      `INSERT INTO company_department_folders (department_id, parent_folder_id, name)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, parent_folder_id`,
+      [deptId, parentFolderId, name]
     );
     res.json({ success: true, folder: created.rows[0] });
   } catch (err) {
     const msg = String(err.message || '');
-    const status = msg.includes('unique') ? 409 : 500;
-    res.status(status).json({ error: `Failed to create folder: ${err.message}` });
+    if (msg.includes('unique')) {
+      res.status(409).json({ error: 'A folder with this name already exists in this directory.' });
+    } else {
+      res.status(500).json({ error: `Failed to create folder: ${err.message}` });
+    }
+  }
+});
+
+// Create subfolder inside an existing folder
+router.post('/structure/folders/:id/subfolders', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
+  const parentFolderId = Number(req.params.id);
+  const name = String(req.body.name || '').trim();
+  if (!Number.isFinite(parentFolderId) || !name) return bad(res, 'name is required.');
+  try {
+    await ensureCompanyStructureSchema(pool);
+    // Get parent folder to inherit department_id
+    const parentRes = await pool.query(
+      `SELECT id, department_id FROM company_department_folders WHERE id = $1 LIMIT 1`,
+      [parentFolderId]
+    );
+    if (parentRes.rows.length === 0) return res.status(404).json({ error: 'Parent folder not found.' });
+    const deptId = parentRes.rows[0].department_id;
+    const created = await pool.query(
+      `INSERT INTO company_department_folders (department_id, parent_folder_id, name)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, parent_folder_id`,
+      [deptId, parentFolderId, name]
+    );
+    res.json({ success: true, folder: created.rows[0] });
+  } catch (err) {
+    const msg = String(err.message || '');
+    if (msg.includes('unique')) {
+      res.status(409).json({ error: 'A folder with this name already exists in this directory.' });
+    } else {
+      res.status(500).json({ error: `Failed to create subfolder: ${err.message}` });
+    }
   }
 });
 
@@ -217,7 +295,7 @@ router.put('/structure/folders/:id', verifyToken, async (req, res) => {
     await ensureCompanyStructureSchema(client);
     await client.query('BEGIN');
     const fRes = await client.query(
-      `SELECT f.id, f.department_id, f.name, d.company_id, d.fy_id, d.name AS dept_name
+      `SELECT f.id, f.department_id, f.name, f.parent_folder_id, d.company_id, d.fy_id, d.name AS dept_name
        FROM company_department_folders f
        JOIN company_departments d ON d.id = f.department_id
        WHERE f.id = $1
@@ -229,14 +307,18 @@ router.put('/structure/folders/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Folder not found.' });
     }
     const row = fRes.rows[0];
-    const oldName = row.name;
+    // Compute old full path before rename
+    const oldFullPath = await getFolderFullPath(client, folderId);
 
     await client.query(
       `UPDATE company_department_folders SET name = $1, updated_at = NOW() WHERE id = $2`,
       [name, folderId]
     );
 
-    // Propagate rename to existing files (folder stored as text).
+    // Compute new full path after rename
+    const newFullPath = await getFolderFullPath(client, folderId);
+
+    // Propagate rename to files: update exact match and path-prefixed subpaths
     await client.query(
       `UPDATE vault_files f
        SET folder = $1
@@ -246,7 +328,19 @@ router.put('/structure/folders/:id', verifyToken, async (req, res) => {
          AND m.fy_id = $3
          AND f.department = $4
          AND COALESCE(f.folder, '') = $5`,
-      [name, row.company_id, row.fy_id, row.dept_name, oldName]
+      [newFullPath, row.company_id, row.fy_id, row.dept_name, oldFullPath]
+    );
+    // Also update files in subfolders (path starts with oldFullPath/)
+    await client.query(
+      `UPDATE vault_files f
+       SET folder = $1 || SUBSTRING(COALESCE(f.folder, ''), LENGTH($5) + 1)
+       FROM vault_file_metadata m
+       WHERE m.file_id = f.id
+         AND m.company_id = $2
+         AND m.fy_id = $3
+         AND f.department = $4
+         AND COALESCE(f.folder, '') LIKE $5 || '/%'`,
+      [newFullPath, row.company_id, row.fy_id, row.dept_name, oldFullPath]
     );
 
     await client.query('COMMIT');
@@ -268,7 +362,7 @@ router.delete('/structure/folders/:id', verifyToken, async (req, res) => {
     await ensureCompanyStructureSchema(client);
     await client.query('BEGIN');
     const fRes = await client.query(
-      `SELECT f.id, f.name, d.company_id, d.fy_id, d.name AS dept_name
+      `SELECT f.id, f.name, f.parent_folder_id, d.company_id, d.fy_id, d.name AS dept_name
        FROM company_department_folders f
        JOIN company_departments d ON d.id = f.department_id
        WHERE f.id = $1
@@ -280,17 +374,21 @@ router.delete('/structure/folders/:id', verifyToken, async (req, res) => {
       return res.status(404).json({ error: 'Folder not found.' });
     }
     const row = fRes.rows[0];
+    const fullPath = await getFolderFullPath(client, folderId);
+    // Check for files in this folder or any sub-folder (path starts with fullPath)
     const countRes = await client.query(
       `SELECT COUNT(*)::int AS n
        FROM vault_files f
        JOIN vault_file_metadata m ON m.file_id = f.id
-       WHERE m.company_id = $1 AND m.fy_id = $2 AND f.department = $3 AND COALESCE(f.folder, '') = $4`,
-      [row.company_id, row.fy_id, row.dept_name, row.name]
+       WHERE m.company_id = $1 AND m.fy_id = $2 AND f.department = $3
+         AND (COALESCE(f.folder, '') = $4 OR COALESCE(f.folder, '') LIKE $4 || '/%')`,
+      [row.company_id, row.fy_id, row.dept_name, fullPath]
     );
     if ((countRes.rows[0]?.n || 0) > 0) {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Cannot delete folder: files exist in this folder.' });
+      return res.status(409).json({ error: 'Cannot delete folder: files exist in this folder or its subfolders.' });
     }
+    // Cascade delete will remove child folders via ON DELETE CASCADE
     await client.query(`DELETE FROM company_department_folders WHERE id = $1`, [folderId]);
     await client.query('COMMIT');
     res.json({ success: true });

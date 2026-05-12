@@ -30,20 +30,47 @@ router.post('/', verifyToken, async (req, res) => {
   const validTypes = ['Parent', 'Subsidiary', 'Division/Branch', 'Independent'];
   const companyType = validTypes.includes(type) ? type : 'Independent';
 
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
       `INSERT INTO companies (name, type, parent_company_id, storage_quota_gb)
        VALUES ($1, $2, $3, $4) RETURNING *`,
       [name.trim(), companyType, parent_company_id || null, storage_quota_gb || 5]
     );
-    await logAction(req.user.id, 'CREATE_COMPANY', null, `Created company ${rows[0].name}`, req.ip);
-    res.json({ success: true, company: rows[0] });
+    const company = rows[0];
+
+    // Immediately create the current Indian Financial Year for this company
+    const now = new Date();
+    const month = now.getMonth(); // 0-indexed
+    const year = now.getFullYear();
+    const fyStartYear = month >= 3 ? year : year - 1;
+    const fyEndYear = fyStartYear + 1;
+    const fyName = `FY ${fyStartYear}-${String(fyEndYear).slice(-2)}`;
+    const fyStart = `${fyStartYear}-04-01`;
+    const fyEnd = `${fyEndYear}-03-31`;
+
+    await client.query(
+      `INSERT INTO financial_years (company_id, name, start_date, end_date, status)
+       VALUES ($1, $2, $3, $4, 'Active')
+       ON CONFLICT DO NOTHING`,
+      [company.id, fyName, fyStart, fyEnd]
+    );
+
+    await client.query('COMMIT');
+    await logAction(req.user.id, 'CREATE_COMPANY', null, `Created company ${company.name} with ${fyName}`, req.ip);
+    res.json({ success: true, company, financial_year: fyName });
   } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
     if (err.code === '23505') return res.status(409).json({ error: 'Company with this name already exists.' });
     console.error('Create company error:', err.message);
     res.status(500).json({ error: 'Failed to create company.' });
+  } finally {
+    client.release();
   }
 });
+
 
 // PATCH /api/companies/:id — Admin only
 router.patch('/:id', verifyToken, async (req, res) => {

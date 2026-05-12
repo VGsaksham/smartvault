@@ -397,6 +397,51 @@ app.get('/api/storage/overview', verifyToken, async (req, res) => {
   }
 });
 
+async function ensureFolderExists(companyId, fyId, departmentName, folderPath) {
+  if (!folderPath || folderPath === 'null' || folderPath === 'undefined') return;
+  const parts = folderPath.split('/').map(p => p.trim()).filter(Boolean);
+  if (parts.length === 0) return;
+
+  // 1. Ensure department exists (usually does, but safe to verify/create)
+  let deptId;
+  const deptRes = await pool.query(
+    'SELECT id FROM company_departments WHERE company_id = $1 AND fy_id = $2 AND LOWER(name) = LOWER($3)',
+    [companyId, fyId, departmentName]
+  );
+  if (deptRes.rows.length > 0) {
+    deptId = deptRes.rows[0].id;
+  } else {
+    const insertDept = await pool.query(
+      'INSERT INTO company_departments (company_id, fy_id, name) VALUES ($1, $2, $3) RETURNING id',
+      [companyId, fyId, departmentName]
+    );
+    deptId = insertDept.rows[0].id;
+  }
+
+  // 2. Ensure each folder in the path exists recursively
+  let parentId = null;
+  for (const part of parts) {
+    let query, params;
+    if (parentId === null) {
+      query = 'SELECT id FROM company_department_folders WHERE department_id = $1 AND parent_folder_id IS NULL AND LOWER(name) = LOWER($2)';
+      params = [deptId, part];
+    } else {
+      query = 'SELECT id FROM company_department_folders WHERE department_id = $1 AND parent_folder_id = $2 AND LOWER(name) = LOWER($3)';
+      params = [deptId, parentId, part];
+    }
+    const folderRes = await pool.query(query, params);
+    if (folderRes.rows.length > 0) {
+      parentId = folderRes.rows[0].id;
+    } else {
+      const insertFolder = await pool.query(
+        'INSERT INTO company_department_folders (department_id, parent_folder_id, name) VALUES ($1, $2, $3) RETURNING id',
+        [deptId, parentId, part]
+      );
+      parentId = insertFolder.rows[0].id;
+    }
+  }
+}
+
 app.post('/api/upload', verifyToken, upload.single('document'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   
@@ -457,23 +502,37 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
 
 
 
+    const customTag = req.body.customTag || req.file.originalname.split('.')[0].replace(/[^a-zA-Z0-9]/g, '');
+    const customName = req.body.customName || null;
+
+    // Construct hierarchical MinIO filename
+    const coRes = await pool.query('SELECT name FROM companies WHERE id = $1', [companyId]);
+    const fyRes = await pool.query('SELECT name FROM financial_years WHERE id = $1', [fyId]);
+    const coName = coRes.rows[0]?.name || 'UnknownCompany';
+    const fyName = fyRes.rows[0]?.name || 'UnknownFY';
+    
+    const sanitize = (str) => String(str).replace(/[^a-zA-Z0-9.\-_]/g, '_');
+    const sCo = sanitize(coName);
+    const sFy = sanitize(fyName);
+    const sDept = sanitize(department);
+    const sFolder = folder ? folder.split('/').map(sanitize).join('/') : '';
+    
+    const minioPath = [sCo, sFy, sDept, sFolder, fileName].filter(Boolean).join('/');
+
     // Hash is unique, proceed with upload (Route based on mime type)
     const isMedia = req.file.mimetype.startsWith('video/') || req.file.mimetype.startsWith('audio/');
-    let storageFilename = fileName;
+    let storageFilename = minioPath;
 
     if (isMedia) {
       if (!isMediaDriveAvailable()) {
         return storageUnavailableResponse(res, 'Media drive (EXTERNAL_DRIVE_PATH)', EXTERNAL_DRIVE_PATH);
       }
-      const fullPath = path.join(EXTERNAL_DRIVE_PATH, fileName);
+      const fullPath = path.join(EXTERNAL_DRIVE_PATH, fileName); // keep media on disk flat for now
       await fs.promises.writeFile(fullPath, req.file.buffer);
       storageFilename = 'local:' + fileName;
     } else {
-      await minioClient.putObject(FILE_BUCKET, fileName, req.file.buffer, req.file.size);
+      await minioClient.putObject(FILE_BUCKET, minioPath, req.file.buffer, req.file.size);
     }
-
-    const customTag = req.body.customTag || req.file.originalname.split('.')[0].replace(/[^a-zA-Z0-9]/g, '');
-    const customName = req.body.customName || null;
 
     // Auto Naming System
     const date = new Date();
@@ -495,6 +554,11 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
     const deptCode = codes[department] || 'UNC';
     const autoName = `${deptCode}-${year}-${month}-${String(seq).padStart(4, '0')}-${customTag}`;
 
+    // Auto-create folder structure in database if needed
+    if (folder) {
+      await ensureFolderExists(companyId, fyId, department, folder);
+    }
+
     // Insert with new columns
     const insertQuery = `INSERT INTO vault_files (original_name, minio_filename, size_bytes, mime_type, department, folder, file_hash, uploaded_by, auto_name, custom_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`;
     const dbResult = await pool.query(insertQuery, [req.file.originalname, storageFilename, req.file.size, req.file.mimetype, department, folder, fileHash, req.user.id, autoName, customName]);
@@ -515,8 +579,79 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
 
 // GET Companies Endpoint
 
+// --- PUBLIC PREVIEW ENDPOINTS (No Login Required) ---
 
+app.get('/api/public/files/:id', async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT f.*, c.name as company_name, fy.name as fy_name
+      FROM vault_files f
+      LEFT JOIN vault_file_metadata m ON f.id = m.file_id
+      LEFT JOIN companies c ON m.company_id = c.id
+      LEFT JOIN financial_years fy ON m.fy_id = fy.id
+      WHERE f.id = $1
+    `, [req.params.id]);
+    
+    if (result.rows.length === 0) return res.status(404).json({ error: 'File not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
+app.get('/api/public/folder', async (req, res) => {
+  try {
+    const { dept, folder } = req.query;
+    if (!dept) return res.status(400).json({ error: 'Department is required' });
+    
+    let query = `
+      SELECT f.id, f.original_name, f.size_bytes, f.upload_date, f.folder, c.name as company_name, fy.name as fy_name
+      FROM vault_files f
+      LEFT JOIN vault_file_metadata m ON f.id = m.file_id
+      LEFT JOIN companies c ON m.company_id = c.id
+      LEFT JOIN financial_years fy ON m.fy_id = fy.id
+      WHERE f.department = $1
+    `;
+    const params = [dept];
+    if (folder && folder !== 'null') {
+      query += ` AND f.folder = $2`;
+      params.push(folder);
+    } else {
+      query += ` AND (f.folder IS NULL OR f.folder = 'null')`;
+    }
+    
+    const result = await pool.query(query, params);
+    res.json({ department: dept, folder: folder || 'Root', files: result.rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET SINGLE File Metadata (Secure)
+app.get('/api/files/:id', verifyToken, async (req, res) => {
+  try {
+    await hydrateRequestUser(req);
+    const result = await pool.query(`
+      SELECT f.*, c.name as company_name, fy.name as fy_name
+      FROM vault_files f
+      LEFT JOIN vault_file_metadata m ON f.id = m.file_id
+      LEFT JOIN companies c ON m.company_id = c.id
+      LEFT JOIN financial_years fy ON m.fy_id = fy.id
+      WHERE f.id = $1
+    `, [req.params.id]);
+    
+    if (result.rows.length === 0) return res.status(404).json({ error: 'File not found' });
+    const file = result.rows[0];
+    
+    if (!canAccessDepartment(req.user, file.department)) {
+      return res.status(403).json({ error: 'Access Denied.' });
+    }
+    
+    res.json(file);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 
 // TOGGLE Star on a file (per user)
@@ -759,7 +894,7 @@ app.get('/api/structure', verifyToken, async (req, res) => {
     const deptIds = departments.map((d) => d.id);
     const folderRows = deptIds.length
       ? await pool.query(
-          `SELECT id, department_id, name
+          `SELECT id, department_id, parent_folder_id, name
            FROM company_department_folders
            WHERE department_id = ANY($1::int[])
            ORDER BY LOWER(name) ASC`,
@@ -770,7 +905,7 @@ app.get('/api/structure', verifyToken, async (req, res) => {
     const byDept = new Map();
     for (const f of folderRows.rows) {
       if (!byDept.has(f.department_id)) byDept.set(f.department_id, []);
-      byDept.get(f.department_id).push(String(f.name));
+      byDept.get(f.department_id).push({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null });
     }
 
     res.json({
@@ -1300,11 +1435,85 @@ app.get('/api/stream/:id', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/download/:minioFilename', verifyToken, async (req, res) => {
+// Public Preview endpoint (serves PDF/media without token)
+app.get('/api/public/preview/:id', async (req, res) => {
   try {
+    const fileResult = await pool.query(
+      'SELECT minio_filename, original_name, mime_type, department FROM vault_files WHERE id = $1 LIMIT 1',
+      [req.params.id]
+    );
+    if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
+
+    const fileRecord = fileResult.rows[0];
+    const isLocal = fileRecord.minio_filename.startsWith('local:');
+    const actualFileName = isLocal ? fileRecord.minio_filename.substring(6) : fileRecord.minio_filename;
+    const originalName = fileRecord.original_name;
+    const ext = path.extname(originalName).toLowerCase();
+
+    const PREVIEWABLE_OFFICE = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp'];
+    const needsConversion = PREVIEWABLE_OFFICE.includes(ext);
+
+    // Conversion helper
+    const convertToPdf = (fileBuffer, inputExt) => new Promise((resolve, reject) => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sv-preview-'));
+      const tmpInput = path.join(tmpDir, `input${inputExt}`);
+      fs.writeFileSync(tmpInput, fileBuffer);
+
+      execFile('libreoffice', [
+        '--headless',
+        '--convert-to', 'pdf',
+        '--outdir', tmpDir,
+        tmpInput
+      ], { timeout: 30000 }, (err) => {
+        if (err) { fs.rmSync(tmpDir, { recursive: true, force: true }); return reject(err); }
+        const pdfPath = path.join(tmpDir, 'input.pdf');
+        if (!fs.existsSync(pdfPath)) { fs.rmSync(tmpDir, { recursive: true, force: true }); return reject(new Error('Conversion produced no output')); }
+        const pdfBuffer = fs.readFileSync(pdfPath);
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+        resolve(pdfBuffer);
+      });
+    });
+
+    let fileBuffer;
+    if (isLocal) {
+      if (!isMediaDriveAvailable()) {
+        return storageUnavailableResponse(res, 'Media drive (EXTERNAL_DRIVE_PATH)', EXTERNAL_DRIVE_PATH);
+      }
+      const fullPath = path.join(EXTERNAL_DRIVE_PATH, actualFileName);
+      fileBuffer = await fs.promises.readFile(fullPath);
+    } else {
+      const chunks = [];
+      const stream = await minioClient.getObject(FILE_BUCKET, actualFileName);
+      await new Promise((resolve, reject) => {
+        stream.on('data', chunk => chunks.push(chunk));
+        stream.on('end', resolve);
+        stream.on('error', reject);
+      });
+      fileBuffer = Buffer.concat(chunks);
+    }
+
+    if (needsConversion) {
+      const pdfBuffer = await convertToPdf(fileBuffer, ext);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `inline; filename="preview_${path.parse(originalName).name}.pdf"`);
+      return res.send(pdfBuffer);
+    }
+
+    res.setHeader('Content-Type', fileRecord.mime_type || 'application/octet-stream');
+    res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
+    res.send(fileBuffer);
+  } catch (error) {
+    console.error("Public Preview error:", error);
+    res.status(500).json({ error: "Failed to generate preview" });
+  }
+});
+
+app.get(/^\/api\/download\/(.+)$/, verifyToken, async (req, res) => {
+  try {
+    const minioFilename = req.params[0];
     await hydrateRequestUser(req);
     // Check Database Privacy First
-    const fileResult = await pool.query('SELECT department FROM vault_files WHERE minio_filename = $1 LIMIT 1', [req.params.minioFilename]);
+    const fileResult = await pool.query('SELECT department FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
     if (fileResult.rows.length === 0) return res.status(404).json({ error: "File not found in database" });
 
     const fileRecord = fileResult.rows[0];
@@ -1312,8 +1521,8 @@ app.get('/api/download/:minioFilename', verifyToken, async (req, res) => {
       return res.status(403).json({ error: "Access Denied. You can only download files from your assigned department." });
     }
 
-    const isLocal = req.params.minioFilename.startsWith('local:');
-    const actualFileName = isLocal ? req.params.minioFilename.substring(6) : req.params.minioFilename;
+    const isLocal = minioFilename.startsWith('local:');
+    const actualFileName = isLocal ? minioFilename.substring(6) : minioFilename;
 
     if (isLocal) {
       if (!isMediaDriveAvailable()) {
@@ -1333,6 +1542,36 @@ app.get('/api/download/:minioFilename', verifyToken, async (req, res) => {
   } catch (error) {
     console.error(error);
     res.status(404).json({ error: "File not found" });
+  }
+});
+
+app.get(/^\/api\/public\/download\/(.+)$/, async (req, res) => {
+  try {
+    const minioFilename = req.params[0];
+    const fileResult = await pool.query('SELECT original_name, department FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
+    if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
+
+    const fileRecord = fileResult.rows[0];
+    const originalName = fileRecord.original_name;
+    const isLocal = minioFilename.startsWith('local:');
+    const actualName = isLocal ? minioFilename.substring(6) : minioFilename;
+
+    if (isLocal) {
+      if (!isMediaDriveAvailable()) return storageUnavailableResponse(res, 'Media drive (EXTERNAL_DRIVE_PATH)', EXTERNAL_DRIVE_PATH);
+      const localPath = path.join(EXTERNAL_DRIVE_PATH, actualName);
+      if (!fs.existsSync(localPath)) return res.status(404).json({ error: 'Local file missing' });
+      res.download(localPath, originalName);
+    } else {
+      const stat = await minioClient.statObject(FILE_BUCKET, actualName);
+      res.setHeader('Content-Disposition', `attachment; filename="${originalName}"`);
+      res.setHeader('Content-Type', stat.metaData['content-type'] || 'application/octet-stream');
+      res.setHeader('Content-Length', stat.size);
+      const stream = await minioClient.getObject(FILE_BUCKET, actualName);
+      stream.pipe(res);
+    }
+  } catch (error) {
+    console.error("Public Download error:", error);
+    res.status(500).json({ error: "Download failed" });
   }
 });
 
@@ -1664,6 +1903,41 @@ app.get('/api/files/bulk/download', verifyToken, async (req, res) => {
 // FINANCIAL YEAR LIFECYCLE ENGINE
 // ============================================
 
+// Runtime toggle — survives as long as the server process is alive.
+// Persisted across restarts via the system_settings table (see endpoints below).
+let FY_AUTO_SYNC_ENABLED = true;
+
+// Load persisted value from DB once pool is ready
+(async () => {
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS system_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+    const r = await pool.query(`SELECT value FROM system_settings WHERE key = 'fy_auto_sync'`);
+    if (r.rows.length > 0) FY_AUTO_SYNC_ENABLED = r.rows[0].value !== 'false';
+  } catch {}
+})();
+
+// GET /api/admin/fy-auto-sync — read current setting
+app.get('/api/admin/fy-auto-sync', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only' });
+  res.json({ enabled: FY_AUTO_SYNC_ENABLED });
+});
+
+// POST /api/admin/fy-auto-sync — toggle
+app.post('/api/admin/fy-auto-sync', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only' });
+  const { enabled } = req.body;
+  FY_AUTO_SYNC_ENABLED = Boolean(enabled);
+  try {
+    await pool.query(
+      `INSERT INTO system_settings (key, value) VALUES ('fy_auto_sync', $1)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      [FY_AUTO_SYNC_ENABLED ? 'true' : 'false']
+    );
+  } catch {}
+  console.log(`[FY Engine] Auto-sync ${FY_AUTO_SYNC_ENABLED ? 'ENABLED' : 'DISABLED'} by admin.`);
+  res.json({ enabled: FY_AUTO_SYNC_ENABLED });
+});
+
 /**
  * Calculates the current Indian Financial Year based on a date.
  * FY runs April 1 → March 31.
@@ -1816,11 +2090,16 @@ app.listen(PORT, HOST, async () => {
   await ensureMinioBucket();
   await bootstrapAdminIfConfigured();
 
-  // Run FY sync immediately on server boot
-  await syncFinancialYears();
+  // Run FY sync immediately on server boot (only if enabled)
+  if (FY_AUTO_SYNC_ENABLED) await syncFinancialYears();
+  else console.log('[FY Engine] Auto-sync disabled — skipping boot sync.');
 
   // Schedule nightly sync at 2:00 AM every day
   cron.schedule('0 2 * * *', () => {
+    if (!FY_AUTO_SYNC_ENABLED) {
+      console.log('[Cron] FY auto-sync is disabled — skipping nightly check.');
+      return;
+    }
     console.log('[Cron] Running nightly FY lifecycle check...');
     syncFinancialYears();
   });
