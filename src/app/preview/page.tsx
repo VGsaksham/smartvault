@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { apiUrl } from '@/lib/api';
 import { 
@@ -11,7 +11,7 @@ import {
   FileText
 } from 'lucide-react';
 
-export default function FolderPreviewPage() {
+function FolderPreviewPageInner() {
   const searchParams = useSearchParams();
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -144,5 +144,21 @@ export default function FolderPreviewPage() {
         </p>
       </div>
     </div>
+  );
+}
+export default function FolderPreviewPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex flex-col items-center justify-center min-h-[60vh]">
+          <div className="w-12 h-12 border-4 border-[var(--accent)] border-t-transparent rounded-full animate-spin" />
+          <p className="mt-4 text-[var(--text-secondary)] font-medium">
+            Loading preview…
+          </p>
+        </div>
+      }
+    >
+      <FolderPreviewPageInner />
+    </Suspense>
   );
 }

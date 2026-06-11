@@ -11,6 +11,50 @@ import { useConfirm } from '@/components/ConfirmProvider';
 import { CustomSelect } from '@/components/ui/Select';
 
 type StructureDepartment = { name: string; folders: { id: number; name: string; parent_folder_id: number | null }[] };
+type UploadQueueItem = { id: string; file: File; targetFolder?: string; proposedName: string; proposedFolder?: string };
+
+function escapeCsv(value: string): string {
+  if (/[",\n]/.test(value)) {
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+  return value;
+}
+
+function parseCsvTable(text: string): { headers: string[]; rows: string[][] } {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const rows = lines.map((line) => {
+    const cols: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') {
+        if (inQuotes && line[i + 1] === '"') {
+          current += '"';
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch === ',' && !inQuotes) {
+        cols.push(current.trim());
+        current = '';
+      } else {
+        current += ch;
+      }
+    }
+    cols.push(current.trim());
+    return cols.map((c) => c.replace(/^"(.*)"$/, '$1'));
+  });
+  const headers = (rows[0] || []).map((h) => h.replace(/^\uFEFF/, '').trim().toLowerCase());
+  return { headers, rows: rows.slice(1) };
+}
+
+function getCsvCell(headers: string[], cols: string[], key: string): string {
+  const idx = headers.indexOf(key.toLowerCase());
+  if (idx < 0) return '';
+  return String(cols[idx] || '').replace(/^\uFEFF/, '').trim();
+}
 
 export default function MainDashboard() {
   const [files, setFiles] = useState<any[]>([]);
@@ -25,6 +69,8 @@ export default function MainDashboard() {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [uploadCustomTag, setUploadCustomTag] = useState("");
   const [uploadFolder, setUploadFolder] = useState("");
+  const [uploadQueue, setUploadQueue] = useState<UploadQueueItem[]>([]);
+  const [uploadCsvInputKey, setUploadCsvInputKey] = useState(0);
   
   // File Viewer State
   const [selectedFile, setSelectedFile] = useState<any | null>(null);
@@ -50,6 +96,9 @@ export default function MainDashboard() {
   const [renameSuffix, setRenameSuffix] = useState("");
   const [renameText, setRenameText] = useState("");
   const [renameSequenceStart, setRenameSequenceStart] = useState<number | "">("");
+  const [renameCsvOverrides, setRenameCsvOverrides] = useState<Record<number, string>>({});
+  const [renameFolderOverrides, setRenameFolderOverrides] = useState<Record<number, string | null>>({});
+  const [renameCsvInputKey, setRenameCsvInputKey] = useState(0);
 
   const [showTagModal, setShowTagModal] = useState(false);
   const [tagInput, setTagInput] = useState("");
@@ -158,6 +207,8 @@ export default function MainDashboard() {
     const params = new URLSearchParams(searchParams);
     params.delete('upload');
     router.replace(`${pathname}?${params.toString()}`);
+    setUploadQueue([]);
+    setUploadCsvInputKey((k) => k + 1);
   };
 
 
@@ -586,22 +637,91 @@ export default function MainDashboard() {
           }
           return { file: entry.file, targetFolder: targetFolder || undefined };
         });
-        uploadFiles(fileList);
+        queueUploads(fileList);
       }
     } else if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const fileList = Array.from(e.dataTransfer.files).map(file => ({ file, targetFolder: uploadFolder || undefined }));
-      uploadFiles(fileList);
+      queueUploads(fileList);
     }
   };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const fileList = Array.from(e.target.files).map(file => ({ file, targetFolder: uploadFolder || undefined }));
-      uploadFiles(fileList);
+      queueUploads(fileList);
     }
   };
 
-  const uploadFiles = async (fileList: { file: File, targetFolder?: string }[]) => {
+  const queueUploads = (fileList: { file: File, targetFolder?: string }[]) => {
+    if (fileList.length === 0) return;
+    const queued = fileList.map(({ file, targetFolder }) => ({
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      file,
+      targetFolder,
+      proposedName: file.name,
+      proposedFolder: targetFolder || ''
+    }));
+    setUploadQueue((prev) => [...prev, ...queued]);
+  };
+
+  const applyUploadCsv = async (file: File) => {
+    try {
+      const text = await file.text();
+      const { headers, rows } = parseCsvTable(text);
+      if (rows.length === 0) {
+        setAlertConfig({ title: 'Invalid CSV', message: 'CSV is empty.', isError: true });
+        return;
+      }
+      let updated = 0;
+      setUploadQueue((prev) =>
+        prev.map((item) => {
+          const row = rows.find((cols) => {
+            const rowId = getCsvCell(headers, cols, 'row_id');
+            if (rowId) return rowId === item.id;
+            const prevName = getCsvCell(headers, cols, 'prev_name');
+            const prevPath = getCsvCell(headers, cols, 'prev_path');
+            if (!prevName) return false;
+            if (prevPath) return prevName === item.file.name && prevPath === String(item.targetFolder || '');
+            return prevName === item.file.name;
+          });
+          if (!row) return item;
+          const nextName = getCsvCell(headers, row, 'new_name') || item.proposedName;
+          const nextPathRaw = getCsvCell(headers, row, 'new_path');
+          const nextFolder = nextPathRaw === '' ? '' : nextPathRaw;
+          updated++;
+          return { ...item, proposedName: nextName, proposedFolder: nextFolder };
+        })
+      );
+      setAlertConfig({ title: 'CSV Applied', message: `Updated ${updated} queued row(s).`, isError: false });
+    } catch {
+      setAlertConfig({ title: 'CSV Error', message: 'Failed to read CSV file.', isError: true });
+    } finally {
+      setUploadCsvInputKey((k) => k + 1);
+    }
+  };
+
+  const downloadUploadCsvTemplate = () => {
+    const header = 'row_id,prev_name,prev_path,new_name,new_path';
+    const lines = uploadQueue.map((item) =>
+      [
+        escapeCsv(item.id),
+        escapeCsv(item.file.name),
+        escapeCsv(item.targetFolder || ''),
+        escapeCsv(item.proposedName),
+        escapeCsv(item.proposedFolder || '')
+      ].join(',')
+    );
+    const csv = [header, ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'upload_file_names_template.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const uploadFiles = async (fileList: UploadQueueItem[]) => {
     if (uploading || fileList.length === 0) return;
     if (!uploadDept || uploadDept === "Select Department" || uploadDept === "") {
       setAlertConfig({ title: 'Missing Department', message: 'Please select a department before uploading.', isError: true });
@@ -613,17 +733,19 @@ export default function MainDashboard() {
     const failures: string[] = [];
 
     for (let i = 0; i < fileList.length; i++) {
-      const { file, targetFolder } = fileList[i];
+      const { file, targetFolder, proposedName, proposedFolder } = fileList[i];
       setUploadProgress(0);
-      setUploadText(`Uploading ${file.name} (${i + 1} of ${fileList.length})...`);
+      setUploadText(`Uploading ${proposedName} (${i + 1} of ${fileList.length})...`);
       
       const formData = new FormData();
-      formData.append('document', file);
+      const uploadFile = proposedName !== file.name ? new File([file], proposedName, { type: file.type, lastModified: file.lastModified }) : file;
+      formData.append('document', uploadFile);
       formData.append('department', uploadDept);
       if (companyId) formData.append('companyId', companyId);
       if (fyId) formData.append('fyId', fyId);
       if (uploadCustomTag) formData.append('customTag', uploadCustomTag);
-      if (targetFolder) formData.append('folder', targetFolder);
+      const finalFolder = proposedFolder ?? targetFolder;
+      if (finalFolder) formData.append('folder', finalFolder);
 
       try {
         const token = localStorage.getItem('token');
@@ -658,6 +780,7 @@ export default function MainDashboard() {
     fetchFiles();
     setTimeout(() => {
       setUploading(false);
+      setUploadQueue([]);
       closeUploadModal();
     }, 2000);
   };
@@ -806,11 +929,19 @@ export default function MainDashboard() {
 
   const handleBulkRename = () => {
     const renames: Record<number, string> = {};
+    const folders: Record<number, string | null> = {};
     const oldNamesMap: Record<number, string> = {};
     selectedFileIds.forEach((id, index) => {
       const file = files.find(f => f.id === id);
       if (file) {
         oldNamesMap[id] = file.original_name;
+        if (Object.prototype.hasOwnProperty.call(renameFolderOverrides, id)) {
+          folders[id] = renameFolderOverrides[id];
+        }
+        if (renameCsvOverrides[id]) {
+          renames[id] = renameCsvOverrides[id];
+          return;
+        }
         const dotIndex = file.original_name.lastIndexOf('.');
         const hasExtension = dotIndex > 0;
         const baseName = hasExtension ? file.original_name.slice(0, dotIndex) : file.original_name;
@@ -824,9 +955,94 @@ export default function MainDashboard() {
     });
     handleBulkAction(
       'RENAME',
-      { renames, renameMap: renames, names: renames },
+      { renames, renameMap: renames, names: renames, folders, folderMap: folders, paths: folders },
       { action: 'RENAME', payload: { renames: oldNamesMap }, fileIds: selectedFileIds }
     );
+  };
+
+  useEffect(() => {
+    if (!showRenameModal) {
+      setRenameCsvOverrides({});
+      setRenameFolderOverrides({});
+      setRenameCsvInputKey((k) => k + 1);
+    }
+  }, [showRenameModal]);
+
+  const downloadRenameCsvTemplate = () => {
+    const header = 'file_id,prev_name,prev_path,new_name,new_path';
+    const lines = selectedFileIds
+      .map((id, index) => {
+        const file = files.find((f) => f.id === id);
+        if (!file) return null;
+        const dotIndex = file.original_name.lastIndexOf('.');
+        const hasExtension = dotIndex > 0;
+        const originalBase = hasExtension ? file.original_name.slice(0, dotIndex) : file.original_name;
+        const ext = hasExtension ? file.original_name.slice(dotIndex + 1) : '';
+        const base = renameText.trim() || originalBase;
+        const seq = renameSequenceStart !== "" ? String(Number(renameSequenceStart) + index).padStart(2, '0') : "";
+        const seqPart = seq ? `-${seq}` : "";
+        const renamed = `${renamePrefix}${base}${renameSuffix}${seqPart}`;
+        const suggested = ext ? `${renamed}.${ext}` : renamed;
+        return [
+          escapeCsv(String(id)),
+          escapeCsv(file.original_name),
+          escapeCsv(file.folder || ''),
+          escapeCsv(renameCsvOverrides[id] || suggested),
+          escapeCsv(String(renameFolderOverrides[id] ?? file.folder ?? ''))
+        ].join(',');
+      })
+      .filter(Boolean) as string[];
+    const csv = [header, ...lines].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'bulk_rename_template.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const applyRenameCsv = async (file: File) => {
+    try {
+      const text = await file.text();
+      const { headers, rows } = parseCsvTable(text);
+      if (rows.length === 0) {
+        setAlertConfig({ title: 'Invalid CSV', message: 'CSV is empty.', isError: true });
+        return;
+      }
+      const overrides: Record<number, string> = {};
+      const folderOverrides: Record<number, string | null> = {};
+      rows.forEach((cols) => {
+        const fileId = Number(getCsvCell(headers, cols, 'file_id'));
+        let target = files.find((f) => selectedFileIds.includes(f.id) && f.id === fileId);
+        if (!target) {
+          const prevName = getCsvCell(headers, cols, 'prev_name');
+          const prevPath = getCsvCell(headers, cols, 'prev_path');
+          target = files.find((f) =>
+            selectedFileIds.includes(f.id) &&
+            f.original_name === prevName &&
+            (prevPath ? String(f.folder || '') === prevPath : true)
+          );
+        }
+        if (!target) return;
+        const nextName = getCsvCell(headers, cols, 'new_name');
+        const nextPath = getCsvCell(headers, cols, 'new_path');
+        if (nextName) overrides[target.id] = nextName;
+        if (nextPath !== '') {
+          folderOverrides[target.id] = nextPath;
+        } else if (headers.includes('new_path')) {
+          folderOverrides[target.id] = null;
+        }
+      });
+      setRenameCsvOverrides(overrides);
+      setRenameFolderOverrides(folderOverrides);
+      const changed = new Set([...Object.keys(overrides), ...Object.keys(folderOverrides)]).size;
+      setAlertConfig({ title: 'CSV Applied', message: `Loaded ${changed} override row(s).`, isError: false });
+    } catch {
+      setAlertConfig({ title: 'CSV Error', message: 'Failed to read CSV file.', isError: true });
+    } finally {
+      setRenameCsvInputKey((k) => k + 1);
+    }
   };
 
   const handleBulkDownload = () => {
@@ -1799,6 +2015,33 @@ export default function MainDashboard() {
             )}
 
             {/* Upload Zone: Single combined area */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="text-[12px] text-[rgba(0,0,0,0.48)]">CSV columns: `row_id,prev_name,prev_path,new_name,new_path` (do not change `row_id`).</div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={uploadQueue.length === 0}
+                  onClick={downloadUploadCsvTemplate}
+                  className="px-3 py-1.5 rounded-[8px] text-[12px] font-medium bg-[#f5f5f7] hover:bg-[#e8e8ed] disabled:opacity-40"
+                >
+                  CSV
+                </button>
+                <label className="px-3 py-1.5 rounded-[8px] text-[12px] font-medium bg-[#f5f5f7] hover:bg-[#e8e8ed] cursor-pointer">
+                  ⭱
+                  <input
+                    key={uploadCsvInputKey}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="sr-only"
+                    onChange={(e) => {
+                      const csv = e.target.files?.[0];
+                      if (csv) applyUploadCsv(csv);
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+
             <div className="flex gap-2 mb-3">
               <label className={`flex-1 flex flex-col items-center justify-center py-10 px-4 border-[3px] border-dashed rounded-[16px] transition-colors cursor-pointer ${
                 uploading ? 'bg-[#f5f5f7] border-[rgba(0,0,0,0.08)] opacity-60 cursor-wait'
@@ -1843,6 +2086,60 @@ export default function MainDashboard() {
                 )}
               </label>
             </div>
+
+            {uploadQueue.length > 0 && (
+              <div className="mt-3">
+                <h4 className="text-[13px] font-semibold text-[#1d1d1f] mb-2">Upload Confirmation ({uploadQueue.length})</h4>
+                <div className="max-h-[220px] overflow-y-auto rounded-[12px] border border-[rgba(0,0,0,0.08)] bg-[#fafafc]">
+                  {uploadQueue.slice(0, 20).map((item) => (
+                    <div key={item.id} className="px-3 py-2 text-[12px] border-b border-[rgba(0,0,0,0.05)] last:border-b-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="truncate flex-1 text-[rgba(0,0,0,0.6)]">{item.file.name}</span>
+                        <span className="text-[rgba(0,0,0,0.32)]">→</span>
+                        <input
+                          value={item.proposedName}
+                          onChange={(e) =>
+                            setUploadQueue((prev) => prev.map((p) => p.id === item.id ? { ...p, proposedName: e.target.value } : p))
+                          }
+                          className="flex-1 bg-white rounded-[8px] px-2 py-1 border border-[rgba(0,0,0,0.12)] outline-none focus:border-[#007AFF]"
+                        />
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[rgba(0,0,0,0.45)] w-[70px] shrink-0">Path</span>
+                        <input
+                          value={item.proposedFolder || ''}
+                          onChange={(e) =>
+                            setUploadQueue((prev) => prev.map((p) => p.id === item.id ? { ...p, proposedFolder: e.target.value } : p))
+                          }
+                          placeholder="Root (empty)"
+                          className="flex-1 bg-white rounded-[8px] px-2 py-1 border border-[rgba(0,0,0,0.12)] outline-none focus:border-[#007AFF]"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                {uploadQueue.length > 20 && (
+                  <div className="mt-1 text-[11px] text-[rgba(0,0,0,0.42)]">Showing first 20 rows. All queued files will be uploaded.</div>
+                )}
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setUploadQueue([])}
+                    className="px-4 py-2 rounded-[10px] text-[13px] bg-[#f5f5f7] hover:bg-[#e8e8ed]"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    disabled={uploading || uploadQueue.length === 0}
+                    onClick={() => uploadFiles(uploadQueue)}
+                    className="px-4 py-2 rounded-[10px] text-[13px] bg-[#007AFF] text-white hover:bg-[#0066cc] disabled:opacity-50"
+                  >
+                    {uploading ? 'Uploading...' : `Confirm Upload (${uploadQueue.length})`}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -2033,6 +2330,26 @@ export default function MainDashboard() {
               </div>
             </div>
 
+            <div className="px-5 sm:px-8 py-3 border-b border-[rgba(0,0,0,0.04)] flex items-center justify-between gap-3">
+              <div className="text-[12px] text-[rgba(0,0,0,0.48)]">CSV columns: `file_id,prev_name,prev_path,new_name,new_path`</div>
+              <div className="flex items-center gap-2">
+                <button onClick={downloadRenameCsvTemplate} className="px-3 py-1.5 rounded-[8px] text-[12px] font-medium bg-[#f5f5f7] hover:bg-[#e8e8ed]">CSV</button>
+                <label className="px-3 py-1.5 rounded-[8px] text-[12px] font-medium bg-[#f5f5f7] hover:bg-[#e8e8ed] cursor-pointer">
+                  ⭱
+                  <input
+                    key={renameCsvInputKey}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="sr-only"
+                    onChange={(e) => {
+                      const csv = e.target.files?.[0];
+                      if (csv) applyRenameCsv(csv);
+                    }}
+                  />
+                </label>
+              </div>
+            </div>
+
             <div className="flex-1 overflow-y-auto px-5 sm:px-8 py-4 bg-[var(--bg-elevated)]">
               <h4 className="text-[13px] font-semibold text-[var(--text-primary)] mb-3">Preview Changes</h4>
               <div className="flex flex-col gap-2">
@@ -2047,12 +2364,19 @@ export default function MainDashboard() {
                   const seq = renameSequenceStart !== "" ? String(Number(renameSequenceStart) + index).padStart(2, '0') : "";
                   const seqPart = seq ? `-${seq}` : "";
                   const renamed = `${renamePrefix}${base}${renameSuffix}${seqPart}`;
-                  const newName = ext ? `${renamed}.${ext}` : renamed;
+                  const generatedName = ext ? `${renamed}.${ext}` : renamed;
+                  const newName = renameCsvOverrides[id] || generatedName;
                   return (
-                    <div key={id} className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-0 text-[13px] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[8px] px-3 py-2">
+                    <div key={id} className="flex flex-col gap-1 text-[13px] bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[8px] px-3 py-2">
+                      <div className="text-[11px] text-[var(--text-tertiary)]">#{id} | path: {String(file.folder || '') || 'Root'}</div>
+                      {Object.prototype.hasOwnProperty.call(renameFolderOverrides, id) && (
+                        <div className="text-[11px] text-[var(--text-tertiary)]">new path: {renameFolderOverrides[id] || 'Root'}</div>
+                      )}
+                      <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-0">
                       <span className="text-[var(--text-secondary)] truncate flex-1">{file.original_name}</span>
                       <span className="hidden sm:inline mx-3 text-[var(--text-tertiary)] opacity-30">→</span>
                       <span className="text-[var(--text-primary)] font-medium truncate flex-1">{newName}</span>
+                      </div>
                     </div>
                   );
                 })}
