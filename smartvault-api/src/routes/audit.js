@@ -164,8 +164,8 @@ router.post('/:id/undo', verifyToken, async (req, res) => {
         const entries = Array.isArray(payload.entries) ? payload.entries : [];
         for (const e of entries) {
           await client.query(
-            'UPDATE vault_files SET original_name = $1, custom_name = $2 WHERE id = $3',
-            [e.prev_original_name, e.prev_custom_name, e.file_id]
+            'UPDATE vault_files SET original_name = $1, custom_name = $2, folder = $3 WHERE id = $4',
+            [e.prev_original_name, e.prev_custom_name, e.prev_folder ?? null, e.file_id]
           );
         }
       } else if (actionType === 'BULK_TAG') {

@@ -627,52 +627,7 @@ app.get('/api/public/folder', async (req, res) => {
   }
 });
 
-// GET SINGLE File Metadata (Secure)
-app.get('/api/files/:id', verifyToken, async (req, res) => {
-  try {
-    await hydrateRequestUser(req);
-    const result = await pool.query(`
-      SELECT f.*, c.name as company_name, fy.name as fy_name
-      FROM vault_files f
-      LEFT JOIN vault_file_metadata m ON f.id = m.file_id
-      LEFT JOIN companies c ON m.company_id = c.id
-      LEFT JOIN financial_years fy ON m.fy_id = fy.id
-      WHERE f.id = $1
-    `, [req.params.id]);
-    
-    if (result.rows.length === 0) return res.status(404).json({ error: 'File not found' });
-    const file = result.rows[0];
-    
-    if (!canAccessDepartment(req.user, file.department)) {
-      return res.status(403).json({ error: 'Access Denied.' });
-    }
-    
-    res.json(file);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-
-// TOGGLE Star on a file (per user)
-app.post('/api/files/:id/star', verifyToken, async (req, res) => {
-  const fileId = req.params.id;
-  const userId = req.user.id;
-  try {
-    const existing = await pool.query('SELECT id FROM starred_files WHERE user_id=$1 AND file_id=$2', [userId, fileId]);
-    if (existing.rows.length > 0) {
-      await pool.query('DELETE FROM starred_files WHERE user_id=$1 AND file_id=$2', [userId, fileId]);
-      res.json({ starred: false });
-    } else {
-      await pool.query('INSERT INTO starred_files (user_id, file_id) VALUES ($1, $2)', [userId, fileId]);
-      res.json({ starred: true });
-    }
-  } catch (err) {
-    res.status(500).json({ error: "Failed to toggle star" });
-  }
-});
-
-// GET Starred files for current user
+// GET Starred files for current user (must be registered before /api/files/:id)
 app.get('/api/files/starred', verifyToken, async (req, res) => {
   try {
     const result = await pool.query(`
@@ -754,185 +709,7 @@ app.get('/api/files/recent', verifyToken, async (req, res) => {
   }
 });
 
-app.get('/api/search/options', verifyToken, async (req, res) => {
-  try {
-    await hydrateRequestUser(req);
-    const normalizedCompanyId = req.query.companyId ? Number(req.query.companyId) : null;
-    const normalizedFyId = req.query.fyId ? Number(req.query.fyId) : null;
-    const hasScope = Number.isFinite(normalizedCompanyId) && Number.isFinite(normalizedFyId);
-    const values = [];
-    let accessClause = '';
-    if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = Array.from(
-        new Set(
-          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
-            .map((x) => Number(x.company_id))
-            .filter((x) => Number.isFinite(x))
-        )
-      );
-      if (allowedCompanyIds.length > 0) {
-        accessClause = `WHERE m.company_id = ANY($${values.length + 1})`;
-        values.push(allowedCompanyIds);
-      }
-      if (normalizedCompanyId && allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(normalizedCompanyId)) {
-        return res.status(403).json({ error: "You do not have access to this company." });
-      }
-      const deptScope = getAllowedDepartmentsForCompany(req.user, normalizedCompanyId);
-      if (deptScope.length > 0) {
-        accessClause = `${accessClause ? `${accessClause} AND` : 'WHERE'} f.department = ANY($${values.length + 1})`;
-        values.push(deptScope);
-      } else {
-        accessClause = `${accessClause ? `${accessClause} AND` : 'WHERE'} 1=0`;
-      }
-    }
-
-    const result = await pool.query(
-      `
-      SELECT
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT f.department), NULL) AS departments,
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT c.name), NULL) AS company_names,
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT fy.name), NULL) AS fy_names,
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT u.username), NULL) AS uploaded_by_names,
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE WHEN f.minio_filename LIKE 'local:%' THEN 'External HDD' ELSE 'MinIO' END), NULL) AS hdd_locations
-      FROM vault_files f
-      LEFT JOIN vault_file_metadata m ON m.file_id = f.id
-      LEFT JOIN companies c ON c.id = m.company_id
-      LEFT JOIN financial_years fy ON fy.id = m.fy_id
-      LEFT JOIN users u ON u.id = f.uploaded_by
-      ${accessClause}
-      `,
-      values
-    );
-
-    const tagsResult = await pool.query(
-      `
-      SELECT DISTINCT jsonb_array_elements_text(COALESCE(tags::jsonb, '[]'::jsonb)) AS tag
-      FROM vault_files f
-      LEFT JOIN vault_file_metadata m ON m.file_id = f.id
-      ${accessClause}
-      `,
-      values
-    ).catch(() => ({ rows: [] }));
-
-    // If companyId+fyId are provided, prefer managed departments even if they have no files yet.
-    let managedDepartments = null;
-    if (hasScope) {
-      try {
-        const managed = await pool.query(
-          `SELECT name
-           FROM company_departments
-           WHERE company_id = $1 AND fy_id = $2
-           ORDER BY LOWER(name) ASC`,
-          [normalizedCompanyId, normalizedFyId]
-        );
-        managedDepartments = managed.rows.map((r) => r.name).filter(Boolean);
-      } catch {
-        managedDepartments = null;
-      }
-    }
-
-    const rawDepartments = managedDepartments && managedDepartments.length > 0
-      ? managedDepartments
-      : (result.rows[0]?.departments || []);
-
-    // Apply user access filtering even when using managed departments.
-    const departments =
-      req.user.role === 'Admin'
-        ? rawDepartments
-        : rawDepartments.filter((d) => getAllowedDepartmentsForCompany(req.user, normalizedCompanyId).includes(d));
-
-    res.json({
-      departments,
-      companies: result.rows[0]?.company_names || [],
-      financialYears: result.rows[0]?.fy_names || [],
-      uploadedBy: result.rows[0]?.uploaded_by_names || [],
-      hddLocations: result.rows[0]?.hdd_locations || [],
-      tags: tagsResult.rows.map((r) => r.tag).filter(Boolean)
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to load search options' });
-  }
-});
-
-// Company + FY structure (Departments + Folders)
-app.get('/api/structure', verifyToken, async (req, res) => {
-  try {
-    await hydrateRequestUser(req);
-    const companyId = req.query.companyId ? Number(req.query.companyId) : null;
-    const fyId = req.query.fyId ? Number(req.query.fyId) : null;
-    if (!Number.isFinite(companyId) || !Number.isFinite(fyId)) {
-      return res.status(400).json({ error: 'companyId and fyId are required.' });
-    }
-
-    const deptRows = await pool.query(
-      `SELECT id, name
-       FROM company_departments
-       WHERE company_id = $1 AND fy_id = $2
-       ORDER BY LOWER(name) ASC`,
-      [companyId, fyId]
-    ).catch(() => ({ rows: [] }));
-
-    let departments = deptRows.rows.map((d) => ({ id: d.id, name: d.name }));
-
-    // Apply access filtering for non-admins (match existing rules).
-    if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = Array.from(
-        new Set(
-          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
-            .map((x) => Number(x.company_id))
-            .filter((x) => Number.isFinite(x))
-        )
-      );
-      if (allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(companyId)) {
-        return res.status(403).json({ error: 'You do not have access to this company.' });
-      }
-      const allowed = new Set(getAllowedDepartmentsForCompany(req.user, companyId));
-      departments = departments.filter((d) => allowed.has(d.name));
-    }
-
-    const deptIds = departments.map((d) => d.id);
-    const folderRows = deptIds.length
-      ? await pool.query(
-          `SELECT id, department_id, parent_folder_id, name
-           FROM company_department_folders
-           WHERE department_id = ANY($1::int[])
-           ORDER BY LOWER(name) ASC`,
-          [deptIds]
-        ).catch(() => ({ rows: [] }))
-      : { rows: [] };
-
-    const byDept = new Map();
-    for (const f of folderRows.rows) {
-      if (!byDept.has(f.department_id)) byDept.set(f.department_id, []);
-      byDept.get(f.department_id).push({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null });
-    }
-
-    res.json({
-      company_id: companyId,
-      fy_id: fyId,
-      departments: departments.map((d) => ({ name: d.name, folders: byDept.get(d.id) || [] })),
-    });
-  } catch (err) {
-    res.status(500).json({ error: `Failed to load structure: ${err.message}` });
-  }
-});
-
-// Heartbeat to detect suspended/forced-logout without refresh.
-app.get('/api/auth/heartbeat', verifyToken, async (req, res) => {
-  try {
-    const u = await pool.query('SELECT status FROM users WHERE id = $1 LIMIT 1', [req.user.id]).catch(() => ({ rows: [] }));
-    const status = String(u.rows?.[0]?.status || 'Active');
-    if (status === 'Suspended') {
-      return res.status(403).json({ error: 'Account is suspended.' });
-    }
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: `Heartbeat failed: ${err.message}` });
-  }
-});
-
-// GET Search (scope: all | fy | dept)
+// GET Search (scope: all | fy | dept) — must be registered before /api/files/:id
 app.get('/api/files/search', verifyToken, async (req, res) => {
   const {
     q,
@@ -1122,6 +899,232 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to search" });
+  }
+});
+
+
+// GET SINGLE File Metadata (Secure) — after starred/recent/search literals
+app.get('/api/files/:id', verifyToken, async (req, res) => {
+  if (!/^\d+$/.test(String(req.params.id))) {
+    return res.status(404).json({ error: 'File not found' });
+  }
+  try {
+    await hydrateRequestUser(req);
+    const result = await pool.query(`
+      SELECT f.*, c.name as company_name, fy.name as fy_name
+      FROM vault_files f
+      LEFT JOIN vault_file_metadata m ON f.id = m.file_id
+      LEFT JOIN companies c ON m.company_id = c.id
+      LEFT JOIN financial_years fy ON m.fy_id = fy.id
+      WHERE f.id = $1
+    `, [req.params.id]);
+    
+    if (result.rows.length === 0) return res.status(404).json({ error: 'File not found' });
+    const file = result.rows[0];
+    
+    if (!canAccessDepartment(req.user, file.department)) {
+      return res.status(403).json({ error: 'Access Denied.' });
+    }
+    
+    res.json(file);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// TOGGLE Star on a file (per user)
+app.post('/api/files/:id/star', verifyToken, async (req, res) => {
+  const fileId = req.params.id;
+  const userId = req.user.id;
+  try {
+    const existing = await pool.query('SELECT id FROM starred_files WHERE user_id=$1 AND file_id=$2', [userId, fileId]);
+    if (existing.rows.length > 0) {
+      await pool.query('DELETE FROM starred_files WHERE user_id=$1 AND file_id=$2', [userId, fileId]);
+      res.json({ starred: false });
+    } else {
+      await pool.query('INSERT INTO starred_files (user_id, file_id) VALUES ($1, $2)', [userId, fileId]);
+      res.json({ starred: true });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Failed to toggle star" });
+  }
+});
+
+app.get('/api/search/options', verifyToken, async (req, res) => {
+  try {
+    await hydrateRequestUser(req);
+    const normalizedCompanyId = req.query.companyId ? Number(req.query.companyId) : null;
+    const normalizedFyId = req.query.fyId ? Number(req.query.fyId) : null;
+    const hasScope = Number.isFinite(normalizedCompanyId) && Number.isFinite(normalizedFyId);
+    const values = [];
+    let accessClause = '';
+    if (req.user.role !== 'Admin') {
+      const allowedCompanyIds = Array.from(
+        new Set(
+          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
+            .map((x) => Number(x.company_id))
+            .filter((x) => Number.isFinite(x))
+        )
+      );
+      if (allowedCompanyIds.length > 0) {
+        accessClause = `WHERE m.company_id = ANY($${values.length + 1})`;
+        values.push(allowedCompanyIds);
+      }
+      if (normalizedCompanyId && allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(normalizedCompanyId)) {
+        return res.status(403).json({ error: "You do not have access to this company." });
+      }
+      const deptScope = getAllowedDepartmentsForCompany(req.user, normalizedCompanyId);
+      if (deptScope.length > 0) {
+        accessClause = `${accessClause ? `${accessClause} AND` : 'WHERE'} f.department = ANY($${values.length + 1})`;
+        values.push(deptScope);
+      } else {
+        accessClause = `${accessClause ? `${accessClause} AND` : 'WHERE'} 1=0`;
+      }
+    }
+
+    const result = await pool.query(
+      `
+      SELECT
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT f.department), NULL) AS departments,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT c.name), NULL) AS company_names,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT fy.name), NULL) AS fy_names,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT u.username), NULL) AS uploaded_by_names,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE WHEN f.minio_filename LIKE 'local:%' THEN 'External HDD' ELSE 'MinIO' END), NULL) AS hdd_locations
+      FROM vault_files f
+      LEFT JOIN vault_file_metadata m ON m.file_id = f.id
+      LEFT JOIN companies c ON c.id = m.company_id
+      LEFT JOIN financial_years fy ON fy.id = m.fy_id
+      LEFT JOIN users u ON u.id = f.uploaded_by
+      ${accessClause}
+      `,
+      values
+    );
+
+    const tagsResult = await pool.query(
+      `
+      SELECT DISTINCT jsonb_array_elements_text(COALESCE(tags::jsonb, '[]'::jsonb)) AS tag
+      FROM vault_files f
+      LEFT JOIN vault_file_metadata m ON m.file_id = f.id
+      ${accessClause}
+      `,
+      values
+    ).catch(() => ({ rows: [] }));
+
+    // If companyId+fyId are provided, prefer managed departments even if they have no files yet.
+    let managedDepartments = null;
+    if (hasScope) {
+      try {
+        const managed = await pool.query(
+          `SELECT name
+           FROM company_departments
+           WHERE company_id = $1 AND fy_id = $2
+           ORDER BY LOWER(name) ASC`,
+          [normalizedCompanyId, normalizedFyId]
+        );
+        managedDepartments = managed.rows.map((r) => r.name).filter(Boolean);
+      } catch {
+        managedDepartments = null;
+      }
+    }
+
+    const rawDepartments = managedDepartments && managedDepartments.length > 0
+      ? managedDepartments
+      : (result.rows[0]?.departments || []);
+
+    // Apply user access filtering even when using managed departments.
+    const departments =
+      req.user.role === 'Admin'
+        ? rawDepartments
+        : rawDepartments.filter((d) => getAllowedDepartmentsForCompany(req.user, normalizedCompanyId).includes(d));
+
+    res.json({
+      departments,
+      companies: result.rows[0]?.company_names || [],
+      financialYears: result.rows[0]?.fy_names || [],
+      uploadedBy: result.rows[0]?.uploaded_by_names || [],
+      hddLocations: result.rows[0]?.hdd_locations || [],
+      tags: tagsResult.rows.map((r) => r.tag).filter(Boolean)
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to load search options' });
+  }
+});
+
+// Company + FY structure (Departments + Folders)
+app.get('/api/structure', verifyToken, async (req, res) => {
+  try {
+    await hydrateRequestUser(req);
+    const companyId = req.query.companyId ? Number(req.query.companyId) : null;
+    const fyId = req.query.fyId ? Number(req.query.fyId) : null;
+    if (!Number.isFinite(companyId) || !Number.isFinite(fyId)) {
+      return res.status(400).json({ error: 'companyId and fyId are required.' });
+    }
+
+    const deptRows = await pool.query(
+      `SELECT id, name
+       FROM company_departments
+       WHERE company_id = $1 AND fy_id = $2
+       ORDER BY LOWER(name) ASC`,
+      [companyId, fyId]
+    ).catch(() => ({ rows: [] }));
+
+    let departments = deptRows.rows.map((d) => ({ id: d.id, name: d.name }));
+
+    // Apply access filtering for non-admins (match existing rules).
+    if (req.user.role !== 'Admin') {
+      const allowedCompanyIds = Array.from(
+        new Set(
+          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
+            .map((x) => Number(x.company_id))
+            .filter((x) => Number.isFinite(x))
+        )
+      );
+      if (allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(companyId)) {
+        return res.status(403).json({ error: 'You do not have access to this company.' });
+      }
+      const allowed = new Set(getAllowedDepartmentsForCompany(req.user, companyId));
+      departments = departments.filter((d) => allowed.has(d.name));
+    }
+
+    const deptIds = departments.map((d) => d.id);
+    const folderRows = deptIds.length
+      ? await pool.query(
+          `SELECT id, department_id, parent_folder_id, name
+           FROM company_department_folders
+           WHERE department_id = ANY($1::int[])
+           ORDER BY LOWER(name) ASC`,
+          [deptIds]
+        ).catch(() => ({ rows: [] }))
+      : { rows: [] };
+
+    const byDept = new Map();
+    for (const f of folderRows.rows) {
+      if (!byDept.has(f.department_id)) byDept.set(f.department_id, []);
+      byDept.get(f.department_id).push({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null });
+    }
+
+    res.json({
+      company_id: companyId,
+      fy_id: fyId,
+      departments: departments.map((d) => ({ name: d.name, folders: byDept.get(d.id) || [] })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: `Failed to load structure: ${err.message}` });
+  }
+});
+
+// Heartbeat to detect suspended/forced-logout without refresh.
+app.get('/api/auth/heartbeat', verifyToken, async (req, res) => {
+  try {
+    const u = await pool.query('SELECT status FROM users WHERE id = $1 LIMIT 1', [req.user.id]).catch(() => ({ rows: [] }));
+    const status = String(u.rows?.[0]?.status || 'Active');
+    if (status === 'Suspended') {
+      return res.status(403).json({ error: 'Account is suspended.' });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: `Heartbeat failed: ${err.message}` });
   }
 });
 
@@ -1630,6 +1633,7 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
   const normalizedTargetDepartment = payload?.targetDepartment || payload?.target_department || payload?.destinationDepartment || null;
   const normalizedTargetFolder = payload?.targetFolder ?? payload?.target_folder ?? payload?.destinationFolder ?? null;
   const normalizedRenames = payload?.renames || payload?.renameMap || payload?.names || null;
+  const normalizedFolders = payload?.folders || payload?.folderMap || payload?.paths || null;
 
   const bulkActionFlagMap = {
     MOVE: 'can_bulk_move',
@@ -1747,11 +1751,26 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
             file_id: fileId,
             prev_original_name: fileRecord.original_name,
             prev_custom_name: fileRecord.custom_name ?? null,
+            prev_folder: fileRecord.folder ?? null,
           });
           if (!normalizedRenames || normalizedRenames[fileId] === undefined) throw new Error("New name required for all files");
+          let nextFolder = fileRecord.folder ?? null;
+          if (normalizedFolders && Object.prototype.hasOwnProperty.call(normalizedFolders, fileId)) {
+            const raw = normalizedFolders[fileId];
+            nextFolder = raw === null || raw === undefined || String(raw).trim() === '' ? null : String(raw).trim();
+            if (nextFolder) {
+              const meta = await client.query(
+                'SELECT company_id, fy_id FROM vault_file_metadata WHERE file_id = $1 LIMIT 1',
+                [fileId]
+              );
+              if (meta.rows.length > 0) {
+                await ensureFolderExists(meta.rows[0].company_id, meta.rows[0].fy_id, fileRecord.department, nextFolder);
+              }
+            }
+          }
           await client.query(
-            'UPDATE vault_files SET original_name = $1, custom_name = $1 WHERE id = $2',
-            [normalizedRenames[fileId], fileId]
+            'UPDATE vault_files SET original_name = $1, custom_name = $1, folder = $2 WHERE id = $3',
+            [normalizedRenames[fileId], nextFolder, fileId]
           );
           break;
         case 'TAG':
