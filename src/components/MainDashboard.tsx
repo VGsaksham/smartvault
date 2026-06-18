@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { FileText, Image as ImageIcon, FileArchive, File as FileIcon, Search, CloudUpload, Trash2, Folder, HardDrive, Shield, FolderInput, Copy, Edit2, Tag, Calendar, Download, QrCode, Undo2, Star, CheckSquare, MousePointer2, LayoutGrid, List as ListIcon, MoreVertical, Moon, Sun, Music, Video, Printer, Plus, AlertCircle } from 'lucide-react';
+import { FileText, Image as ImageIcon, FileArchive, File as FileIcon, Search, CloudUpload, Trash2, Folder, HardDrive, Shield, FolderInput, Copy, Edit2, Tag, Calendar, Download, QrCode, Undo2, Star, CheckSquare, MousePointer2, LayoutGrid, List as ListIcon, MoreVertical, Moon, Sun, Music, Video, Printer, Plus, AlertCircle, UploadCloud } from 'lucide-react';
 import axios from 'axios';
 import { QRCodeSVG } from 'qrcode.react';
 import DepartmentDashboard from './DepartmentDashboard';
@@ -105,6 +105,11 @@ export default function MainDashboard() {
 
   const [toastMessage, setToastMessage] = useState<{message: string, timestamp: number, undoAction?: string, undoPayload?: any, undoFileIds?: number[]} | null>(null);
   const [isBulkProcessing, setIsBulkProcessing] = useState(false);
+  
+  const [showAliasModal, setShowAliasModal] = useState(false);
+  const [aliasTarget, setAliasTarget] = useState<'files'|'folders'>('files');
+  const [aliasChanges, setAliasChanges] = useState<Array<{id: number, oldName: string, alias: string}>>([]);
+  const [aliasUploading, setAliasUploading] = useState(false);
 
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [highlightedFileId, setHighlightedFileId] = useState<number | null>(null);
@@ -381,14 +386,15 @@ export default function MainDashboard() {
     return () => window.removeEventListener('smartvault:structureChanged', handler as any);
   }, [companyId, fyId]);
 
-  const deptFoldersMap = useMemo(() => {
+  const { deptFoldersMap, folderAliasMap } = useMemo(() => {
     const map: Record<string, string[]> = {};
+    const aliasMap: Record<string, string> = {};
     for (const d of structureDepartments) {
       const name = String((d as any)?.name || '').trim();
       if (!name) continue;
       const folders: any[] = Array.isArray((d as any)?.folders) ? (d as any).folders : [];
-      // Build full slash-separated paths from the flat list with parent_folder_id
       const folderById = new Map<number, any>(folders.map((f: any) => [f.id, f]));
+      
       const getPath = (id: number, visited = new Set<number>()): string => {
         if (visited.has(id)) return '';
         visited.add(id);
@@ -398,9 +404,34 @@ export default function MainDashboard() {
         const parentPath = getPath(f.parent_folder_id, visited);
         return parentPath ? `${parentPath}/${f.name}` : String(f.name || '');
       };
-      map[name] = folders.map((f: any) => typeof f === 'string' ? f : getPath(f.id)).filter(Boolean);
+
+      const getAliasPath = (id: number, visited = new Set<number>()): string => {
+        if (visited.has(id)) return '';
+        visited.add(id);
+        const f = folderById.get(id);
+        if (!f) return '';
+        const namePart = f.user_alias || f.name || '';
+        if (!f.parent_folder_id) return String(namePart);
+        const parentPath = getAliasPath(f.parent_folder_id, visited);
+        return parentPath ? `${parentPath}/${namePart}` : String(namePart);
+      };
+      
+      const paths: string[] = [];
+      for (const f of folders) {
+        if (typeof f === 'string') {
+          paths.push(f);
+        } else {
+          const original = getPath(f.id);
+          const alias = getAliasPath(f.id);
+          paths.push(original);
+          if (original && alias && original !== alias) {
+             aliasMap[`${name}::${original}`] = alias;
+          }
+        }
+      }
+      map[name] = paths.filter(Boolean);
     }
-    return map;
+    return { deptFoldersMap: map, folderAliasMap: aliasMap };
   }, [structureDepartments]);
 
   const deptList = useMemo(() => {
@@ -1217,7 +1248,7 @@ export default function MainDashboard() {
       { key: 'fy', label: file.fy_name || `FY ${file.fy_id || '-'}` },
       { key: 'dept', label: file.department || 'Department' },
       ...(file.folder ? [{ key: 'folder', label: file.folder }] : []),
-      { key: 'file', label: file.custom_name || file.auto_name || file.original_name || 'File' }
+      { key: 'file', label: file.user_alias || file.custom_name || file.auto_name || file.original_name || 'File' }
     ] as const;
 
     return (
@@ -1396,6 +1427,13 @@ export default function MainDashboard() {
 
             <div className="flex items-center gap-2">
               <button 
+                onClick={() => setShowAliasModal(true)}
+                title="Manage My Names (CSV)"
+                className="w-[36px] h-[36px] rounded-[12px] bg-[var(--bg-neutral)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--accent)] transition-all border border-[var(--border-subtle)] flex items-center justify-center shrink-0"
+              >
+                <Edit2 size={16} />
+              </button>
+              <button 
                 onClick={toggleDarkMode}
                 className="p-2 rounded-[12px] bg-[var(--bg-neutral)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] transition-all border border-[var(--border-subtle)]"
               >
@@ -1453,7 +1491,7 @@ export default function MainDashboard() {
                           }}
                           className="text-[15px] font-bold text-[var(--accent)] hover:opacity-80 transition-opacity tracking-[-0.374px]"
                         >
-                          {seg}
+                          {folderAliasMap[`${activeDepartment}::${segPath}`]?.split('/').pop() || seg}
                         </button>
                       )}
                     </span>
@@ -1486,7 +1524,7 @@ export default function MainDashboard() {
               {dynamicFolders.length > 0 && (
                 <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-6 md:mb-8">
                   {dynamicFolders.map(folderPath => {
-                    const folderName = folderPath.split('/').pop() || folderPath;
+                    const folderName = folderAliasMap[`${activeDepartment}::${folderPath}`]?.split('/').pop() || folderPath.split('/').pop() || folderPath;
                     // Count files at this exact path AND files in any sub-path
                     const folderCount = Array.isArray(files)
                       ? files.filter(f =>
@@ -1606,7 +1644,7 @@ export default function MainDashboard() {
                     <div className="flex flex-col min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-[15px] font-medium text-[#1d1d1f] truncate">
-                          {file.custom_name || file.auto_name || file.original_name}
+                          {file.user_alias || file.custom_name || file.auto_name || file.original_name}
                         </span>
                         {searchQuery && (
                           <>
@@ -1664,7 +1702,7 @@ export default function MainDashboard() {
 
                   <div className="flex flex-col flex-1">
                     <span className="text-[17px] font-semibold tracking-[-0.374px] text-[#1d1d1f] line-clamp-2 leading-[1.24] mb-2 break-words">
-                      {file.custom_name || file.auto_name || file.original_name || 'Unknown File'}
+                      {file.user_alias || file.custom_name || file.auto_name || file.original_name || 'Unknown File'}
                     </span>
                     {searchQuery && (
                       <div className="flex items-center gap-1.5 mb-2">
@@ -1784,7 +1822,7 @@ export default function MainDashboard() {
                     <Music size={40} className="text-[#0066cc]" />
                   </div>
                   <p className="text-[17px] font-semibold text-[#1d1d1f] tracking-[-0.374px] text-center max-w-xs truncate">
-                    {selectedFile.custom_name || selectedFile.auto_name || selectedFile.original_name}
+                    {selectedFile.user_alias || selectedFile.custom_name || selectedFile.auto_name || selectedFile.original_name}
                   </p>
                   {previewUrl ? (
                     <audio src={previewUrl} controls className="w-full no-invert" style={{ accentColor: '#0066cc' }}>
@@ -2016,7 +2054,13 @@ export default function MainDashboard() {
 
             {/* Upload Zone: Single combined area */}
             <div className="flex items-center justify-between mb-3">
-              <div className="text-[12px] text-[rgba(0,0,0,0.48)]">CSV columns: `row_id,prev_name,prev_path,new_name,new_path` (do not change `row_id`).</div>
+              <div className="flex flex-col gap-1 text-[12px] text-[rgba(0,0,0,0.48)]">
+                <span>CSV columns: `row_id,prev_name,prev_path,new_name,new_path` (do not change `row_id`).</span>
+                <span className="text-[#cc7700] font-medium flex items-center gap-1">
+                  <AlertCircle size={12} />
+                  Warning: Only edit new_name and new_path columns.
+                </span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -2331,7 +2375,13 @@ export default function MainDashboard() {
             </div>
 
             <div className="px-5 sm:px-8 py-3 border-b border-[rgba(0,0,0,0.04)] flex items-center justify-between gap-3">
-              <div className="text-[12px] text-[rgba(0,0,0,0.48)]">CSV columns: `file_id,prev_name,prev_path,new_name,new_path`</div>
+              <div className="flex flex-col gap-1 text-[12px] text-[rgba(0,0,0,0.48)]">
+                <span>CSV columns: `file_id,prev_name,prev_path,new_name,new_path`</span>
+                <span className="text-[#cc7700] font-medium flex items-center gap-1">
+                  <AlertCircle size={12} />
+                  Warning: Only edit new_name and new_path columns.
+                </span>
+              </div>
               <div className="flex items-center gap-2">
                 <button onClick={downloadRenameCsvTemplate} className="px-3 py-1.5 rounded-[8px] text-[12px] font-medium bg-[#f5f5f7] hover:bg-[#e8e8ed]">CSV</button>
                 <label className="px-3 py-1.5 rounded-[8px] text-[12px] font-medium bg-[#f5f5f7] hover:bg-[#e8e8ed] cursor-pointer">
@@ -2514,6 +2564,149 @@ export default function MainDashboard() {
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Alias Modal */}
+      {showAliasModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-[var(--bg-surface)] rounded-[24px] max-w-[500px] w-full p-6 shadow-2xl relative flex flex-col max-h-[85vh]">
+            <h2 className="text-[20px] font-bold text-[var(--text-primary)] mb-2">Manage My Names</h2>
+            <p className="text-[13px] text-[var(--text-secondary)] mb-4">
+              Download the CSV, set your custom names in the <strong>"My Name"</strong> column, and upload it back.
+            </p>
+            <div className="bg-[#ff950015] border border-[#ff950030] rounded-[12px] p-3 mb-4 shrink-0">
+              <p className="text-[12px] font-medium text-[#cc7700] flex items-start gap-2">
+                <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                <span><strong>Warning:</strong> Only edit the "My Name" column. Modifying other columns will cause the import to fail.</span>
+              </p>
+            </div>
+            
+            <div className="flex gap-2 mb-4 shrink-0">
+              <button 
+                onClick={() => { setAliasTarget('files'); setAliasChanges([]); }}
+                className={`flex-1 py-2 text-[13px] font-bold rounded-[10px] transition-colors ${aliasTarget === 'files' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)]'}`}
+              >Files</button>
+              <button 
+                onClick={() => { setAliasTarget('folders'); setAliasChanges([]); }}
+                className={`flex-1 py-2 text-[13px] font-bold rounded-[10px] transition-colors ${aliasTarget === 'folders' ? 'bg-[var(--accent)] text-white' : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)]'}`}
+              >Folders</button>
+            </div>
+
+            {aliasChanges.length > 0 ? (
+              <div className="flex-1 overflow-y-auto mb-4 bg-[var(--bg-elevated)] rounded-[12px] p-3 border border-[var(--border-subtle)]">
+                <h4 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">Preview Changes ({aliasChanges.length})</h4>
+                <div className="flex flex-col gap-2">
+                  {aliasChanges.map((change, i) => (
+                    <div key={i} className="flex flex-col text-[12px] bg-[var(--bg-surface)] p-2 rounded-[8px] border border-[var(--border-subtle)]">
+                      <span className="text-[var(--text-secondary)] truncate">Old: {change.oldName}</span>
+                      <span className="text-[var(--accent)] font-medium truncate">New: {change.alias || '(Removed)'}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-3 shrink-0">
+                <button 
+                  onClick={() => {
+                    const token = localStorage.getItem('token');
+                    fetch(apiUrl(`/api/export/user-aliases/export/${aliasTarget}?department=${encodeURIComponent(activeDepartment)}&companyId=${companyId}&fyId=${fyId}`), { headers: { 'Authorization': `Bearer ${token}` } })
+                      .then(res => res.blob())
+                      .then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = `my_${aliasTarget}_names_${activeDepartment}.csv`;
+                        a.click();
+                      });
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 rounded-[12px] bg-[var(--bg-neutral)] text-[var(--text-primary)] font-semibold text-[14px] hover:bg-[var(--bg-elevated)] transition-colors border border-[var(--border-subtle)]"
+                >
+                  <Download size={18} /> Download CSV
+                </button>
+
+                <label className="w-full flex items-center justify-center gap-2 py-3 rounded-[12px] bg-[var(--accent)] text-white font-semibold text-[14px] hover:brightness-110 transition-colors cursor-pointer text-center">
+                  <UploadCloud size={18} /> Upload CSV
+                  <input 
+                    type="file" 
+                    accept=".csv" 
+                    className="hidden" 
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      e.target.value = '';
+                      const reader = new FileReader();
+                      reader.onload = (evt) => {
+                        const text = evt.target?.result as string;
+                        if (!text) return;
+                        const { headers, rows } = parseCsvTable(text);
+                        const idIdx = headers.indexOf(aliasTarget === 'files' ? 'file id' : 'folder id');
+                        const oldIdx = headers.indexOf(aliasTarget === 'files' ? 'original name' : 'folder path');
+                        const myNameIdx = headers.indexOf('my name');
+                        
+                        if (idIdx < 0 || myNameIdx < 0) {
+                          alert(`Invalid CSV format. Could not find ID or 'My Name' column.`);
+                          return;
+                        }
+                        
+                        const changes = [];
+                        for (const row of rows) {
+                           const idStr = row[idIdx];
+                           if (!idStr) continue;
+                           const id = parseInt(idStr, 10);
+                           if (isNaN(id)) continue;
+                           const oldName = oldIdx >= 0 ? row[oldIdx] : 'Unknown';
+                           const alias = row[myNameIdx] || '';
+                           changes.push({ id, oldName, alias });
+                        }
+                        if (changes.length > 0) {
+                           setAliasChanges(changes);
+                        } else {
+                           alert('No changes found in CSV.');
+                        }
+                      };
+                      reader.readAsText(file);
+                    }} 
+                  />
+                </label>
+              </div>
+            )}
+            
+            {aliasChanges.length > 0 && (
+              <button 
+                disabled={aliasUploading}
+                onClick={() => {
+                  setAliasUploading(true);
+                  const token = localStorage.getItem('token');
+                  fetch(apiUrl(`/api/export/user-aliases/import/${aliasTarget}`), {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ changes: aliasChanges })
+                  }).then(res => {
+                    if (!res.ok) throw new Error('Upload failed');
+                    setAliasUploading(false);
+                    setShowAliasModal(false);
+                    setAliasChanges([]);
+                    window.dispatchEvent(new Event('smartvault:structureChanged'));
+                    fetchFiles();
+                  }).catch(() => {
+                    alert('Failed to upload aliases');
+                    setAliasUploading(false);
+                  });
+                }}
+                className="w-full flex items-center justify-center gap-2 py-3 rounded-[12px] bg-[var(--accent)] text-white font-semibold text-[14px] hover:brightness-110 transition-colors disabled:opacity-50 shrink-0"
+              >
+                {aliasUploading ? 'Saving...' : 'Confirm & Save Changes'}
+              </button>
+            )}
+
+            <button 
+              onClick={() => { setShowAliasModal(false); setAliasChanges([]); }}
+              className="mt-4 w-full py-2 text-[13px] font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors shrink-0"
+            >
+              Cancel
+            </button>
           </div>
         </div>
       )}

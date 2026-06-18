@@ -274,7 +274,7 @@ export default function TopBar() {
       } finally {
         setLoadingResults(false);
       }
-    }, 250);
+    }, 400);
     return () => clearTimeout(id);
   }, [query, scope, fileType, matchCase, exact, companyId, fyId, folderParam]);
 
@@ -566,7 +566,7 @@ export default function TopBar() {
                   >
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
-                        {file.custom_name || file.auto_name || file.original_name}
+                        {file.user_alias || file.custom_name || file.auto_name || file.original_name}
                       </p>
                     </div>
                     <div className="mt-1 text-[11px] text-[var(--text-tertiary)] flex flex-wrap items-center gap-1">

@@ -170,7 +170,7 @@ export default function DepartmentDashboard({ department, companyId, fyId }: { d
           <div className="grid grid-cols-2 gap-3 flex-1">
             <Link href={`/admin/duplicates?companyId=${companyId || ''}&fyId=${fyId || ''}`} className="flex flex-col items-center justify-center gap-2 bg-[var(--bg-neutral)] rounded-[14px] hover:bg-[var(--bg-elevated)] hover:border-[var(--accent)] border border-transparent transition-all">
               <Search size={18} className="text-[var(--text-primary)]" />
-              <span className="text-[12px] font-medium text-[var(--text-primary)]">Duplicate Scan</span>
+              <span className="text-[12px] font-medium text-[var(--text-primary)] text-center leading-tight">Duplicate Scan</span>
             </Link>
             <button 
               onClick={() => {
@@ -187,7 +187,7 @@ export default function DepartmentDashboard({ department, companyId, fyId }: { d
               }}
               className="flex flex-col items-center justify-center gap-2 bg-[var(--bg-neutral)] rounded-[14px] hover:bg-[var(--bg-elevated)] hover:border-[var(--accent)] border border-transparent transition-all">
               <Download size={18} className="text-[var(--text-primary)]" />
-              <span className="text-[12px] font-medium text-[var(--text-primary)]">Export Activity</span>
+              <span className="text-[12px] font-medium text-[var(--text-primary)] text-center leading-tight">Export Activity</span>
             </button>
           </div>
         </div>
@@ -301,7 +301,6 @@ export default function DepartmentDashboard({ department, companyId, fyId }: { d
             )}
           </div>
         </div>
-
       </div>
     </div>
   );

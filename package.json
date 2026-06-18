@@ -7,8 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "frontend": "node scripts/push-frontend.mjs",
-    "backend": "node scripts/push-backend.mjs"
+    "push": "node scripts/push.mjs"
   },
   "dependencies": {
     "@cyntler/react-doc-viewer": "^1.17.1",

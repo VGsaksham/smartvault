@@ -263,13 +263,14 @@ app.get('/api/files', verifyToken, async (req, res) => {
     await hydrateRequestUser(req);
     let result;
     let query = `
-      SELECT f.*, m.company_id, m.fy_id 
+      SELECT f.*, m.company_id, m.fy_id, ufa.alias_name as user_alias 
       FROM vault_files f 
       LEFT JOIN vault_file_metadata m ON f.id = m.file_id
+      LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
       WHERE 1=1
     `;
-    const values = [];
-    let paramCount = 1;
+    const values = [req.user.id];
+    let paramCount = 2;
 
     if (req.user.role !== 'Admin') {
       const allowedCompanyIds = Array.from(
@@ -631,10 +632,11 @@ app.get('/api/public/folder', async (req, res) => {
 app.get('/api/files/starred', verifyToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT f.*, m.company_id, m.fy_id, true as starred
+      SELECT f.*, m.company_id, m.fy_id, true as starred, ufa.alias_name as user_alias
       FROM vault_files f
       JOIN starred_files s ON s.file_id = f.id
       LEFT JOIN vault_file_metadata m ON m.file_id = f.id
+      LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
       WHERE s.user_id = $1
       ${req.user.role !== 'Admin' ? 'AND f.department = $2' : ''}
       ORDER BY s.created_at DESC
@@ -669,13 +671,14 @@ app.get('/api/files/recent', verifyToken, async (req, res) => {
     }
 
     let query = `
-      SELECT f.*, m.company_id, m.fy_id
+      SELECT f.*, m.company_id, m.fy_id, ufa.alias_name as user_alias
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON m.file_id = f.id
+      LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
       WHERE 1=1
     `;
-    const values = [];
-    let p = 1;
+    const values = [req.user.id];
+    let p = 2;
     if (req.user.role !== 'Admin') {
       const allowedCompanyIds = Array.from(
         new Set(
@@ -762,16 +765,18 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
       SELECT f.*, m.company_id, m.fy_id,
              c.name as company_name,
              u.username as uploaded_by_name,
-             fy.name as fy_name, fy.status as fy_status
+             fy.name as fy_name, fy.status as fy_status,
+             ufa.alias_name as user_alias
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON m.file_id = f.id
       LEFT JOIN companies c ON c.id = m.company_id
       LEFT JOIN financial_years fy ON fy.id = m.fy_id
       LEFT JOIN users u ON u.id = f.uploaded_by
+      LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
       WHERE 1=1
     `;
-    const values = [];
-    let p = 1;
+    const values = [req.user.id];
+    let p = 2;
     let companyFilterApplied = false;
     let fyFilterApplied = false;
 
@@ -780,7 +785,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
     const exactMatch = String(exact) === 'true';
     const comparator = caseSensitive ? 'LIKE' : 'ILIKE';
     const qValue = exactMatch ? queryText : `%${queryText}%`;
-    query += ` AND (f.original_name ${comparator} $${p} OR COALESCE(f.custom_name, '') ${comparator} $${p} OR COALESCE(f.auto_name, '') ${comparator} $${p})`;
+    query += ` AND (f.original_name ${comparator} $${p} OR COALESCE(f.custom_name, '') ${comparator} $${p} OR COALESCE(f.auto_name, '') ${comparator} $${p} OR COALESCE(ufa.alias_name, '') ${comparator} $${p})`;
     values.push(qValue);
     p++;
 
@@ -1090,18 +1095,19 @@ app.get('/api/structure', verifyToken, async (req, res) => {
     const deptIds = departments.map((d) => d.id);
     const folderRows = deptIds.length
       ? await pool.query(
-          `SELECT id, department_id, parent_folder_id, name
-           FROM company_department_folders
-           WHERE department_id = ANY($1::int[])
-           ORDER BY LOWER(name) ASC`,
-          [deptIds]
+          `SELECT f.id, f.department_id, f.parent_folder_id, f.name, ufa.alias_name as user_alias
+           FROM company_department_folders f
+           LEFT JOIN user_folder_aliases ufa ON ufa.folder_id = f.id AND ufa.user_id = $2
+           WHERE f.department_id = ANY($1::int[])
+           ORDER BY LOWER(f.name) ASC`,
+          [deptIds, req.user.id]
         ).catch(() => ({ rows: [] }))
       : { rows: [] };
 
     const byDept = new Map();
     for (const f of folderRows.rows) {
       if (!byDept.has(f.department_id)) byDept.set(f.department_id, []);
-      byDept.get(f.department_id).push({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null });
+      byDept.get(f.department_id).push({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null, user_alias: f.user_alias || null });
     }
 
     res.json({
