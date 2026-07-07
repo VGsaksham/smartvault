@@ -26,21 +26,28 @@ async function ensureUserCompanyAccessSchema(db = pool) {
   await db.query(`UPDATE user_company_access SET department = COALESCE(department, 'Finance') WHERE department IS NULL;`).catch(() => {});
   await db.query(`ALTER TABLE user_company_access ALTER COLUMN department SET NOT NULL;`).catch(() => {});
 
-  // Ensure primary key exists (ignore if already present or incompatible).
+  // Drop the old primary key which might have only been (user_id, company_id)
   await db.query(`
     DO $$
     BEGIN
-      IF NOT EXISTS (
+      IF EXISTS (
         SELECT 1
         FROM pg_constraint
         WHERE conrelid = 'user_company_access'::regclass
           AND contype = 'p'
       ) THEN
-        ALTER TABLE user_company_access
-        ADD CONSTRAINT user_company_access_pkey PRIMARY KEY (user_id, company_id, department);
+        ALTER TABLE user_company_access DROP CONSTRAINT user_company_access_pkey;
       END IF;
     END$$;
   `).catch(() => {});
+
+  // Add the new correct primary key
+  await db.query(`
+    ALTER TABLE user_company_access
+    ADD CONSTRAINT user_company_access_pkey PRIMARY KEY (user_id, company_id, department);
+  `).catch((err) => {
+    console.error("Failed to add new primary key:", err);
+  });
   await db.query(`
     CREATE INDEX IF NOT EXISTS idx_user_company_access_user ON user_company_access(user_id);
   `);
@@ -67,9 +74,19 @@ async function ensureUserCompanyAccessSchema(db = pool) {
       ) THEN
         ALTER TABLE user_company_access DROP CONSTRAINT user_company_access_key;
       END IF;
+      
+      IF EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conrelid = 'user_company_access'::regclass
+          AND conname = 'user_company_access_user_id_company_id_key'
+      ) THEN
+        ALTER TABLE user_company_access DROP CONSTRAINT user_company_access_user_id_company_id_key;
+      END IF;
     END$$;
   `).catch(() => {});
   await db.query(`DROP INDEX IF EXISTS user_company_access_key;`).catch(() => {});
+  await db.query(`DROP INDEX IF EXISTS user_company_access_user_id_company_id_key;`).catch(() => {});
   await db.query(`DROP INDEX IF EXISTS idx_user_company_access_user_company;`).catch(() => {});
 }
 
@@ -81,8 +98,10 @@ function normalizeCompanyAccess(rawAccess = [], fallbackDepartment = '') {
 
   for (const item of arr) {
     const companyId = Number(item?.company_id);
-    const department = String(item?.department || '').trim() || fallback;
-    if (!Number.isFinite(companyId) || !department) continue;
+    let department = String(item?.department || '').trim();
+
+    if (!Number.isFinite(companyId) || typeof department !== 'string') continue;
+
     const key = `${companyId}::${department}`;
     if (seen.has(key)) continue;
     seen.add(key);

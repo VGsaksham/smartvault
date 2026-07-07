@@ -78,11 +78,19 @@ async function getEffectiveUserSettings(userId, db = pool) {
     [userId]
   ).catch(() => ({ rows: [] }));
 
+  const folderAccessResult = await db.query(
+    `SELECT company_id, department, folder_path, is_exclusion
+     FROM user_folder_access
+     WHERE user_id = $1`,
+    [userId]
+  ).catch(() => ({ rows: [] }));
+
   return {
     ...effectiveUser,
     allowed_departments: effectiveUser.allowed_departments || [],
     dept_upload_permissions: deptUploadPermissions,
     company_access: companyAccessResult.rows || [],
+    folder_access: folderAccessResult.rows || [],
   };
 }
 

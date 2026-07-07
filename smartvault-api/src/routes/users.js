@@ -59,7 +59,8 @@ router.get('/', verifyToken, async (req, res) => {
              ${userCols.has('status') ? 'u.status' : "'Active'::text AS status"},
              ${userCols.has('last_ip_address') ? 'u.last_ip_address' : 'NULL::text AS last_ip_address'},
              ${userCols.has('created_at') ? 'u.created_at' : 'NOW() AS created_at'},
-             ${canReadCompanyAccess ? "COALESCE(ca.company_access, '[]'::json) AS company_access" : "'[]'::json AS company_access"}
+             ${canReadCompanyAccess ? "COALESCE(ca.company_access, '[]'::json) AS company_access" : "'[]'::json AS company_access"},
+             COALESCE(fa.folder_access, '[]'::json) AS folder_access
       FROM users u
       ${canReadCompanyAccess ? `
       LEFT JOIN LATERAL (
@@ -77,6 +78,18 @@ router.get('/', verifyToken, async (req, res) => {
         JOIN companies c ON c.id = uca.company_id
         WHERE uca.user_id = u.id
       ) ca ON TRUE` : ''}
+      LEFT JOIN LATERAL (
+        SELECT json_agg(
+          json_build_object(
+            'company_id', ufa.company_id,
+            'department', ufa.department,
+            'folder_path', ufa.folder_path,
+            'is_exclusion', ufa.is_exclusion
+          )
+        ) AS folder_access
+        FROM user_folder_access ufa
+        WHERE ufa.user_id = u.id
+      ) fa ON TRUE
       WHERE 1=1
     `;
     // Hide superadmin from Admin UI list (still exists in DB).
@@ -210,14 +223,19 @@ router.patch('/:id/permissions', verifyToken, async (req, res) => {
     can_upload_to_allowed,
     preference_updates,
     company_access = [],
+    folder_access = [],
   } = req.body || {};
 
   const companyAccessDepartments = (Array.isArray(company_access) ? company_access : [])
     .map((x) => String(x?.department || '').trim())
     .filter(Boolean);
+  const folderAccessDepartments = (Array.isArray(folder_access) ? folder_access : [])
+    .map((x) => String(x?.department || '').trim())
+    .filter(Boolean);
   const safeAllowedDepartments = Array.from(new Set([
     ...(Array.isArray(allowed_departments) ? allowed_departments : []),
     ...companyAccessDepartments,
+    ...folderAccessDepartments,
   ].map((d) => String(d || '').trim()).filter(Boolean)));
   const departmentUploadPermissions = preference_updates?.department_upload_permissions || {};
 
@@ -278,6 +296,18 @@ router.patch('/:id/permissions', verifyToken, async (req, res) => {
     const fallbackDepartment =
       String(safeAllowedDepartments[0] || targetUserRes.rows?.[0]?.department || '').trim();
     await replaceUserCompanyAccess(client, userId, company_access, fallbackDepartment);
+
+    await client.query('DELETE FROM user_folder_access WHERE user_id = $1', [userId]).catch(() => {});
+    if (Array.isArray(folder_access)) {
+      for (const fa of folder_access) {
+        if (!fa.company_id || !fa.department || !fa.folder_path) continue;
+        await client.query(
+          `INSERT INTO user_folder_access (user_id, company_id, department, folder_path, is_exclusion)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [userId, fa.company_id, fa.department, fa.folder_path, Boolean(fa.is_exclusion)]
+        ).catch(err => console.error("folder_access insert error", err));
+      }
+    }
 
     await client.query('COMMIT');
     res.json({ success: true });

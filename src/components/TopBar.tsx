@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { Search, Mic, User, Menu } from 'lucide-react';
+import { Search, User, Menu, X, Calendar } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
 import { useSidebar } from '@/context/SidebarContext';
 
@@ -40,10 +40,13 @@ export default function TopBar() {
   // Search UI is intentionally NOT synced to URL params.
   // This keeps it independent from the main dashboard listing.
   const [query, setQuery] = useState('');
-  const [scope, setScope] = useState<'fy'|'dept'|'folder'>('fy');
+  const [scope, setScope] = useState<'all_companies'|'fy'|'dept'|'folder'>('fy');
   const [fileType, setFileType] = useState('');
   const [matchCase, setMatchCase] = useState(false);
   const [exact, setExact] = useState(false);
+  const [dateFilter, setDateFilter] = useState(''); // '7days', '30days', 'custom'
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
   const [results, setResults] = useState<any[]>([]);
   const [loadingResults, setLoadingResults] = useState(false);
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
@@ -66,11 +69,12 @@ export default function TopBar() {
         const effectiveRole = tokenRole || parsedUser?.role || null;
         if (effectiveRole !== 'Admin') {
           const ids = Array.from(
-            new Set<number>(
-              (Array.isArray(parsedUser?.company_access) ? parsedUser.company_access : [])
-                .map((entry: any) => Number(entry?.company_id))
-                .filter((id: number) => Number.isFinite(id))
-            )
+            new Set<number>([
+              ...(Array.isArray(parsedUser?.company_access) ? parsedUser.company_access : []).map((entry: any) => Number(entry?.company_id)),
+              ...(Array.isArray(parsedUser?.folder_access) ? parsedUser.folder_access : [])
+                  .filter((entry: any) => !entry.is_exclusion)
+                  .map((entry: any) => Number(entry?.company_id))
+            ].filter((id: number) => Number.isFinite(id)))
           );
           setAllowedCompanyIds(ids.length > 0 ? ids : []);
         } else {
@@ -180,9 +184,7 @@ export default function TopBar() {
       .catch(console.error);
   }, [companyId, pathname, router, searchKey]);
 
-  useEffect(() => {
-    setVoiceSupported(typeof window !== 'undefined' && Boolean((window as any).webkitSpeechRecognition || (window as any).SpeechRecognition));
-  }, []);
+
 
   // Ensure params are preserved in URL when navigating across views
   useEffect(() => {
@@ -264,6 +266,17 @@ export default function TopBar() {
         if (fileType) params.set('fileType', fileType);
         if (matchCase) params.set('matchCase', 'true');
         if (exact) params.set('exact', 'true');
+
+        if (dateFilter === '7days') {
+          const d = new Date(); d.setDate(d.getDate() - 7);
+          params.set('from', d.toISOString());
+        } else if (dateFilter === '30days') {
+          const d = new Date(); d.setDate(d.getDate() - 30);
+          params.set('from', d.toISOString());
+        } else if (dateFilter === 'custom') {
+          if (customFrom) params.set('from', new Date(customFrom).toISOString());
+          if (customTo) params.set('to', new Date(customTo).toISOString());
+        }
         const res = await fetch(apiUrl(`/api/files/search?${params.toString()}`), {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -276,21 +289,9 @@ export default function TopBar() {
       }
     }, 400);
     return () => clearTimeout(id);
-  }, [query, scope, fileType, matchCase, exact, companyId, fyId, folderParam]);
+  }, [query, scope, fileType, matchCase, exact, companyId, fyId, folderParam, dateFilter, customFrom, customTo]);
 
-  const startVoiceSearch = () => {
-    const Recognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!Recognition) return;
-    const recognition = new Recognition();
-    recognition.lang = 'en-US';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onresult = (event: any) => {
-      const spokenText = event.results?.[0]?.[0]?.transcript?.trim();
-      if (spokenText) setQuery(spokenText);
-    };
-    recognition.start();
-  };
+
 
   const openUploadModal = () => {
     const params = new URLSearchParams(searchParams);
@@ -428,13 +429,13 @@ export default function TopBar() {
               onChange={(e) => setQuery(e.target.value)}
               className={`w-full min-w-0 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[980px] py-[6px] pl-[34px] pr-[42px] md:pr-[68px] text-[var(--text-primary)] text-[16px] tracking-[-0.374px] focus:outline-none focus:border-[var(--accent)] transition-all placeholder:text-[var(--text-tertiary)] ${isSearchOpen ? 'ring-2 ring-[var(--accent)]/15' : ''}`}
             />
-            {voiceSupported && (
+            {query && (
               <button
-                onClick={startVoiceSearch}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-colors"
-                title="Voice search"
+                onClick={() => setQuery('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors p-1"
+                title="Clear search"
               >
-                <Mic size={14} />
+                <X size={14} />
               </button>
             )}
           </div>
@@ -483,6 +484,7 @@ export default function TopBar() {
           <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[16px] shadow-[var(--shadow-medium)] overflow-hidden">
             <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center gap-2 flex-wrap">
               {[
+                ['all_companies', 'All companies'],
                 ['fy', 'This FY only'],
                 ['dept', 'This department only'],
                 ['folder', 'This folder only']
@@ -528,6 +530,7 @@ export default function TopBar() {
                     {label}
                   </button>
                 ))}
+                <div className="w-[1px] h-[24px] bg-[var(--border-subtle)] mx-1" />
                 <button
                   onClick={() => setMatchCase((v) => !v)}
                   className={`text-[11px] px-2.5 py-1.5 rounded-[10px] border transition-colors ${
@@ -548,6 +551,47 @@ export default function TopBar() {
                 >
                   Exact
                 </button>
+
+                {/* Date Filters */}
+                <div className="w-full mt-2 flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] text-[var(--text-tertiary)] mr-1 flex items-center gap-1"><Calendar size={12}/> Date:</span>
+                  {[
+                    ['', 'Any time'],
+                    ['7days', 'Last 7 days'],
+                    ['30days', 'Last 30 days'],
+                    ['custom', 'Custom Range']
+                  ].map(([key, label]) => (
+                    <button
+                      key={key}
+                      onClick={() => setDateFilter(key)}
+                      className={`text-[11px] px-2.5 py-1.5 rounded-[10px] border transition-colors ${
+                        dateFilter === key
+                          ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent)]'
+                          : 'bg-[var(--bg-elevated)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:border-[var(--border-default)]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  
+                  {dateFilter === 'custom' && (
+                    <div className="flex items-center gap-1 ml-2 bg-[var(--bg-elevated)] border border-[var(--border-subtle)] rounded-[8px] px-2 py-1">
+                      <input 
+                        type="date" 
+                        value={customFrom}
+                        onChange={(e) => setCustomFrom(e.target.value)}
+                        className="bg-transparent text-[11px] text-[var(--text-secondary)] outline-none"
+                      />
+                      <span className="text-[10px] text-[var(--text-tertiary)]">to</span>
+                      <input 
+                        type="date" 
+                        value={customTo}
+                        onChange={(e) => setCustomTo(e.target.value)}
+                        className="bg-transparent text-[11px] text-[var(--text-secondary)] outline-none"
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

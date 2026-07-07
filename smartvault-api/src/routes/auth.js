@@ -34,7 +34,7 @@ router.post('/register', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin')
     return res.status(403).json({ error: 'Only Administrators can create new user accounts.' });
 
-  const { username, email, password, role, department, primary_company_id } = req.body;
+  const { username, email, password, role, department, primary_company_id, company_access, folder_access } = req.body;
   if (!username || !email || !password || !department)
     return res.status(400).json({ error: 'Username, email, password, and department are required.' });
 
@@ -47,8 +47,12 @@ router.post('/register', verifyToken, async (req, res) => {
        VALUES ($1, $2, $3, $4, $5) RETURNING id, username, role`,
       [username, email, hashedPassword, role || 'Staff', department]
     );
-    if (primary_company_id) {
-      await replaceUserCompanyAccess(pool, rows[0].id, [
+    const newUserId = rows[0].id;
+
+    if (company_access && Array.isArray(company_access) && company_access.length > 0) {
+      await replaceUserCompanyAccess(pool, newUserId, company_access).catch(() => {});
+    } else if (primary_company_id) {
+      await replaceUserCompanyAccess(pool, newUserId, [
         {
           company_id: Number(primary_company_id),
           department,
@@ -57,7 +61,14 @@ router.post('/register', verifyToken, async (req, res) => {
         },
       ]).catch(() => {});
     }
-    await logAction(req.user.id, 'CREATE_USER', rows[0].id, `Created user ${username}`, req.ip);
+
+    if (folder_access && Array.isArray(folder_access) && folder_access.length > 0) {
+      for (const fa of folder_access) {
+         await pool.query(`INSERT INTO user_folder_access (user_id, company_id, department, folder_path, is_exclusion) VALUES ($1, $2, $3, $4, $5)`, [newUserId, fa.company_id, fa.department, fa.folder_path, fa.is_exclusion ? true : false]).catch(console.error);
+      }
+    }
+
+    await logAction(req.user.id, 'CREATE_USER', newUserId, `Created user ${username}`, req.ip);
     console.log(`[EMAIL] Sending welcome email to ${email}`);
     const companyAccess = await getUserCompanyAccess(pool, rows[0].id);
     res.json({ success: true, user: { ...rows[0], company_access: companyAccess } });

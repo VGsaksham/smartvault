@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { apiUrl } from '@/lib/api';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { Building2, CalendarRange, Pencil, Trash2, Plus, RefreshCw, Save, X } from 'lucide-react';
+import { CustomSelect } from '@/components/ui/Select';
 
 type Company = {
   id: number;
@@ -38,9 +39,10 @@ export default function CompaniesAdminPage() {
   const [editingCompanyId, setEditingCompanyId] = useState<number | null>(null);
   const [editCompany, setEditCompany] = useState({ name: '', type: 'Independent', parent_company_id: '', storage_quota_gb: 5 });
   const [editingFyId, setEditingFyId] = useState<number | null>(null);
-  const [editFy, setEditFy] = useState({ name: '', start_date: '', end_date: '', status: 'Planned' });
+  const [editFy, setEditFy] = useState({ startYear: new Date().getFullYear(), status: 'Planned' });
   const [fyAutoSync, setFyAutoSync] = useState<boolean | null>(null);
   const [fyToggleBusy, setFyToggleBusy] = useState(false);
+  const [formFy, setFormFy] = useState({ company_id: '', startYear: new Date().getFullYear() });
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
 
@@ -105,6 +107,21 @@ export default function CompaniesAdminPage() {
   };
   const selectedCompany = useMemo(() => companies.find(c => c.id === selectedCompanyId) || null, [companies, selectedCompanyId]);
 
+  const companyTypeOptions = useMemo(() => COMPANY_TYPES.map(t => ({ label: t, value: t })), []);
+  const parentCompanyOptions = useMemo(() => [
+    { label: 'No parent (standalone)', value: '' },
+    ...companies.map(c => ({ label: c.name, value: String(c.id) }))
+  ], [companies]);
+  const companyOptions = useMemo(() => [
+    { label: 'Select Company', value: '' },
+    ...companies.map(c => ({ label: c.name, value: String(c.id) }))
+  ], [companies]);
+  const fyYearOptions = useMemo(() => Array.from({ length: 60 }, (_, i) => {
+    const year = new Date().getFullYear() + 10 - i;
+    return { label: `FY ${year}-${String(year + 1).slice(-2)}`, value: String(year) };
+  }), []);
+  const fyStatusOptions = useMemo(() => ['Planned', 'Active', 'Archived', 'Locked'].map(s => ({ label: s, value: s })), []);
+
   const createCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
@@ -126,6 +143,29 @@ export default function CompaniesAdminPage() {
     setBusy(false);
   };
 
+  const createFy = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    setBusy(true);
+    const startYear = Number(formFy.startYear);
+    const endYear = startYear + 1;
+    const res = await fetch(apiUrl('/api/financial-years'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        company_id: Number(formFy.company_id),
+        name: `FY ${startYear}-${String(endYear).slice(-2)}`,
+        start_date: `${startYear}-04-01`,
+        end_date: `${endYear}-03-31`,
+        status: 'Archived' // Manual creations usually default to Archived/Planned so they don't auto-activate
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) { setBusy(false); return setAlert(data.error || 'Failed to create financial year'); }
+    setFormFy({ company_id: formFy.company_id, startYear: new Date().getFullYear() }); // keep company selected
+    if (selectedCompanyId === Number(formFy.company_id)) await loadFYs(selectedCompanyId);
+    setBusy(false);
+  };
 
   const startEditCompany = (c: Company) => {
     setEditingCompanyId(c.id);
@@ -181,9 +221,7 @@ export default function CompaniesAdminPage() {
   const startEditFy = (fy: FinancialYear) => {
     setEditingFyId(fy.id);
     setEditFy({
-      name: fy.name,
-      start_date: fy.start_date?.slice(0, 10),
-      end_date: fy.end_date?.slice(0, 10),
+      startYear: fy.start_date ? Number(fy.start_date.substring(0, 4)) : new Date().getFullYear(),
       status: fy.status
     });
   };
@@ -191,10 +229,17 @@ export default function CompaniesAdminPage() {
   const saveFy = async () => {
     if (!token || !editingFyId) return;
     setBusy(true);
+    const startYear = Number(editFy.startYear);
+    const endYear = startYear + 1;
     const res = await fetch(apiUrl(`/api/financial-years/${editingFyId}`), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify(editFy)
+      body: JSON.stringify({
+        name: `FY ${startYear}-${String(endYear).slice(-2)}`,
+        start_date: `${startYear}-04-01`,
+        end_date: `${endYear}-03-31`,
+        status: editFy.status
+      })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) { setBusy(false); return setAlert((data as any)?.error || 'Failed to update financial year'); }
@@ -254,15 +299,27 @@ export default function CompaniesAdminPage() {
         <form onSubmit={createCompany} className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] p-5 sm:p-6 flex flex-col gap-3 shadow-sm">
           <h2 className="text-[15px] font-bold text-[var(--text-primary)] flex items-center gap-2"><Plus size={16} className="text-[var(--accent)]" /> Create Company</h2>
           <input required value={formCompany.name} onChange={e => setFormCompany(p => ({ ...p, name: e.target.value }))} placeholder="Company Name" className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
-          <select value={formCompany.type} onChange={e => setFormCompany(p => ({ ...p, type: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]">
-            {COMPANY_TYPES.map(t => <option key={t}>{t}</option>)}
-          </select>
-          <select value={formCompany.parent_company_id} onChange={e => setFormCompany(p => ({ ...p, parent_company_id: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]">
-            <option value="">No parent (standalone)</option>
-            {companies.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <CustomSelect value={formCompany.type} onChange={v => setFormCompany(p => ({ ...p, type: v as any }))} options={companyTypeOptions} />
+          <CustomSelect value={formCompany.parent_company_id} onChange={v => setFormCompany(p => ({ ...p, parent_company_id: v }))} options={parentCompanyOptions} />
           <input type="number" min={1} value={formCompany.storage_quota_gb} onChange={e => setFormCompany(p => ({ ...p, storage_quota_gb: Number(e.target.value) }))} placeholder="Storage Quota GB" className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
           <button disabled={busy} className="mt-1 py-2.5 rounded-[12px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[14px] font-bold disabled:opacity-60">Create Company</button>
+        </form>
+
+        <form onSubmit={createFy} className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] p-5 sm:p-6 flex flex-col gap-3 shadow-sm">
+          <h2 className="text-[15px] font-bold text-[var(--text-primary)] flex items-center gap-2"><Plus size={16} className="text-[var(--accent)]" /> Create Financial Year</h2>
+          <CustomSelect value={formFy.company_id} onChange={v => setFormFy(p => ({ ...p, company_id: v }))} options={companyOptions} />
+          <div className="flex flex-col gap-1">
+            <label className="text-[12px] text-[var(--text-secondary)] font-semibold px-1">Select Financial Year</label>
+            <CustomSelect value={String(formFy.startYear)} onChange={v => setFormFy(p => ({ ...p, startYear: Number(v) }))} options={fyYearOptions} />
+            {formFy.startYear > (new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1) && (
+              <span className="text-[12px] text-[#ff9500] font-semibold px-1">⚠️ This financial year is in the future.</span>
+            )}
+          </div>
+          <div className="px-3 py-2 bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] text-[13px] text-[var(--text-secondary)] flex flex-col gap-1">
+            <p><strong>Start Date:</strong> April 1, {formFy.startYear}</p>
+            <p><strong>End Date:</strong> March 31, {formFy.startYear + 1}</p>
+          </div>
+          <button disabled={busy} className="mt-1 py-2.5 rounded-[12px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[14px] font-bold disabled:opacity-60">Create Financial Year</button>
         </form>
       </div>
 
@@ -315,13 +372,11 @@ export default function CompaniesAdminPage() {
                   <div className="w-full mt-3 col-span-full">
                     <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input value={editCompany.name} onChange={e => setEditCompany(p => ({ ...p, name: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
-                      <select value={editCompany.type} onChange={e => setEditCompany(p => ({ ...p, type: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]">
-                        {COMPANY_TYPES.map(t => <option key={t}>{t}</option>)}
-                      </select>
-                      <select value={editCompany.parent_company_id} onChange={e => setEditCompany(p => ({ ...p, parent_company_id: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]">
-                        <option value="">No parent</option>
-                        {companies.filter(x => x.id !== c.id).map(x => <option key={x.id} value={x.id}>{x.name}</option>)}
-                      </select>
+                      <CustomSelect value={editCompany.type} onChange={v => setEditCompany(p => ({ ...p, type: v as any }))} options={companyTypeOptions} />
+                      <CustomSelect value={editCompany.parent_company_id} onChange={v => setEditCompany(p => ({ ...p, parent_company_id: v }))} options={[
+                        { label: 'No parent', value: '' },
+                        ...companies.filter(x => x.id !== c.id).map(x => ({ label: x.name, value: String(x.id) }))
+                      ]} />
                       <input type="number" min={1} value={editCompany.storage_quota_gb} onChange={e => setEditCompany(p => ({ ...p, storage_quota_gb: Number(e.target.value) }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
                     </div>
                     <div className="mt-3 flex items-center justify-end gap-2">
@@ -370,15 +425,15 @@ export default function CompaniesAdminPage() {
                 </div>
                 {editing && (
                   <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <input value={editFy.name} onChange={e => setEditFy(p => ({ ...p, name: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
-                    <select value={editFy.status} onChange={e => setEditFy(p => ({ ...p, status: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]">
-                      <option>Planned</option>
-                      <option>Active</option>
-                      <option>Archived</option>
-                      <option>Locked</option>
-                    </select>
-                    <input type="date" value={editFy.start_date} onChange={e => setEditFy(p => ({ ...p, start_date: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
-                    <input type="date" value={editFy.end_date} onChange={e => setEditFy(p => ({ ...p, end_date: e.target.value }))} className="bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-3 py-2 text-[14px]" />
+                    <CustomSelect value={String(editFy.startYear)} onChange={v => setEditFy(p => ({ ...p, startYear: Number(v) }))} options={fyYearOptions} />
+                    <CustomSelect value={editFy.status} onChange={v => setEditFy(p => ({ ...p, status: v as any }))} options={fyStatusOptions} />
+                    <div className="sm:col-span-2 px-3 py-2 bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] text-[13px] text-[var(--text-secondary)] flex justify-between">
+                      <span><strong>Start:</strong> Apr 1, {editFy.startYear}</span>
+                      <span><strong>End:</strong> Mar 31, {editFy.startYear + 1}</span>
+                    </div>
+                    {editFy.startYear > (new Date().getMonth() >= 3 ? new Date().getFullYear() : new Date().getFullYear() - 1) && (
+                      <div className="sm:col-span-2 text-[12px] text-[#ff9500] font-semibold px-1">⚠️ This financial year is in the future.</div>
+                    )}
                     <div className="sm:col-span-2 flex items-center justify-end gap-2">
                       <button onClick={() => setEditingFyId(null)} className="px-3 py-2 rounded-[10px] border border-[var(--border-subtle)] bg-[var(--bg-app)] text-[13px] font-semibold text-[var(--text-secondary)] flex items-center gap-2"><X size={14} /> Cancel</button>
                       <button disabled={busy} onClick={saveFy} className="px-3 py-2 rounded-[10px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[13px] font-bold flex items-center gap-2 disabled:opacity-60"><Save size={14} /> Save</button>

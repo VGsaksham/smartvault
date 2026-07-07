@@ -250,6 +250,74 @@ function getAllowedDepartmentsForCompany(user, companyId = null) {
 }
 // ------------------------
 
+function getAllowedCompanyIds(user) {
+  const companyAccess = Array.isArray(user?.company_access) ? user.company_access : [];
+  const folderAccess = Array.isArray(user?.folder_access) ? user.folder_access : [];
+  const ids = new Set();
+  
+  for (const x of companyAccess) {
+    if (Number.isFinite(Number(x.company_id))) ids.add(Number(x.company_id));
+  }
+  for (const x of folderAccess) {
+    if (!x.is_exclusion && Number.isFinite(Number(x.company_id))) ids.add(Number(x.company_id));
+  }
+  return Array.from(ids);
+}
+
+function buildFileAccessCondition(user, companyId, startParam) {
+  let values = [];
+  let paramCount = startParam;
+  
+  const cidFilter = Number.isFinite(Number(companyId)) ? Number(companyId) : null;
+  const companyRows = Array.isArray(user?.company_access) ? user.company_access : [];
+  const folderRows = Array.isArray(user?.folder_access) ? user.folder_access : [];
+  
+  let fullDepts = new Set();
+  for (const x of companyRows) {
+    const cid = Number(x.company_id);
+    if (cidFilter !== null && cid !== cidFilter) continue;
+    if (!Number.isFinite(cid)) continue;
+    const d = String(x?.department || '').trim();
+    if (d) fullDepts.add(d);
+  }
+  
+  if (fullDepts.size === 0) {
+    const primaryDept = String(user?.department || '').trim();
+    if (primaryDept) fullDepts.add(primaryDept);
+
+    const legacy = Array.isArray(user?.allowed_departments) ? user.allowed_departments : [];
+    for (const d of legacy) {
+      if (String(d).trim()) fullDepts.add(String(d).trim());
+    }
+  }
+  
+  let clauses = [];
+  
+  if (fullDepts.size > 0) {
+    clauses.push(`f.department = ANY($${paramCount++})`);
+    values.push(Array.from(fullDepts));
+  }
+  
+  for (const x of folderRows) {
+    if (x.is_exclusion) continue;
+    const cid = Number(x.company_id);
+    if (cidFilter !== null && cid !== cidFilter) continue;
+    const d = String(x?.department || '').trim();
+    const folder = String(x?.folder_path || '').trim();
+    if (d && folder) {
+      clauses.push(`(f.department = $${paramCount++} AND (f.folder = $${paramCount++} OR f.folder LIKE $${paramCount++}))`);
+      values.push(d);
+      values.push(folder);
+      values.push(folder + '/%');
+    }
+  }
+  
+  if (clauses.length === 0) {
+    return { sql: '1=0', values, paramCount };
+  }
+  return { sql: `(${clauses.join(' OR ')})`, values, paramCount };
+}
+
 // --- RBAC HELPERS in src/services/accessService ---
 
 
@@ -273,13 +341,7 @@ app.get('/api/files', verifyToken, async (req, res) => {
     let paramCount = 2;
 
     if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = Array.from(
-        new Set(
-          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
-            .map((x) => Number(x.company_id))
-            .filter((x) => Number.isFinite(x))
-        )
-      );
+      const allowedCompanyIds = getAllowedCompanyIds(req.user);
       if (allowedCompanyIds.length > 0) {
         query += ` AND m.company_id = ANY($${paramCount++})`;
         values.push(allowedCompanyIds);
@@ -287,13 +349,11 @@ app.get('/api/files', verifyToken, async (req, res) => {
       if (companyId && allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(Number(companyId))) {
         return res.status(403).json({ error: "You do not have access to this company." });
       }
-      const deptScope = getAllowedDepartmentsForCompany(req.user, companyId ? Number(companyId) : null);
-      if (deptScope.length > 0) {
-        query += ` AND f.department = ANY($${paramCount++})`;
-        values.push(deptScope);
-      } else {
-        query += ` AND 1=0`;
-      }
+      
+      const accessRes = buildFileAccessCondition(req.user, companyId, paramCount);
+      query += ` AND ${accessRes.sql}`;
+      values.push(...accessRes.values);
+      paramCount = accessRes.paramCount;
     }
     if (companyId) {
       query += ` AND m.company_id = $${paramCount++}`;
@@ -333,13 +393,7 @@ app.get('/api/storage/overview', verifyToken, async (req, res) => {
       values.push(fyId);
     }
     if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = Array.from(
-        new Set(
-          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
-            .map((x) => Number(x.company_id))
-            .filter((x) => Number.isFinite(x))
-        )
-      );
+      const allowedCompanyIds = getAllowedCompanyIds(req.user);
       if (allowedCompanyIds.length > 0) {
         if (Number.isFinite(companyId) && !allowedCompanyIds.includes(Number(companyId))) {
           return res.status(403).json({ error: "You do not have access to this company." });
@@ -347,13 +401,11 @@ app.get('/api/storage/overview', verifyToken, async (req, res) => {
         where += ` AND m.company_id = ANY($${i++})`;
         values.push(allowedCompanyIds);
       }
-      const deptScope = getAllowedDepartmentsForCompany(req.user, Number.isFinite(companyId) ? Number(companyId) : null);
-      if (deptScope.length > 0) {
-        where += ` AND f.department = ANY($${i++})`;
-        values.push(deptScope);
-      } else {
-        where += ` AND 1=0`;
-      }
+      
+      const accessRes = buildFileAccessCondition(req.user, companyId, i);
+      where += ` AND ${accessRes.sql}`;
+      values.push(...accessRes.values);
+      i = accessRes.paramCount;
     }
 
     const scopeResult = await pool.query(
@@ -1089,6 +1141,13 @@ app.get('/api/structure', verifyToken, async (req, res) => {
         return res.status(403).json({ error: 'You do not have access to this company.' });
       }
       const allowed = new Set(getAllowedDepartmentsForCompany(req.user, companyId));
+      const folderAccess = Array.isArray(req.user.folder_access) ? req.user.folder_access : [];
+      for (const fAccess of folderAccess) {
+        if (!fAccess.is_exclusion && Number(fAccess.company_id) === Number(companyId)) {
+          const deptName = String(fAccess.department || '').trim();
+          if (deptName) allowed.add(deptName);
+        }
+      }
       departments = departments.filter((d) => allowed.has(d.name));
     }
 
@@ -1123,12 +1182,13 @@ app.get('/api/structure', verifyToken, async (req, res) => {
 // Heartbeat to detect suspended/forced-logout without refresh.
 app.get('/api/auth/heartbeat', verifyToken, async (req, res) => {
   try {
+    await hydrateRequestUser(req);
     const u = await pool.query('SELECT status FROM users WHERE id = $1 LIMIT 1', [req.user.id]).catch(() => ({ rows: [] }));
     const status = String(u.rows?.[0]?.status || 'Active');
     if (status === 'Suspended') {
       return res.status(403).json({ error: 'Account is suspended.' });
     }
-    res.json({ ok: true });
+    res.json({ ok: true, user: req.user });
   } catch (err) {
     res.status(500).json({ error: `Heartbeat failed: ${err.message}` });
   }

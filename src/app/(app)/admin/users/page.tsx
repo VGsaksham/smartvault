@@ -11,6 +11,7 @@ type User = {
   role: 'Admin'|'Manager'|'Staff'|'Guest'; department: string;
   allowed_departments: string[]|null;
   company_access?: CompanyAccess[];
+  folder_access?: { company_id: number; department: string; folder_path: string; is_exclusion: boolean }[];
   dept_upload_permissions?: Record<string, boolean>|null;
   can_bulk_move: boolean; can_bulk_copy: boolean; can_bulk_delete: boolean;
   can_bulk_rename: boolean; can_bulk_download: boolean;
@@ -79,6 +80,12 @@ function UsersPageContent() {
     companyId: number;
     companyName: string;
   } | null>(null);
+  const [companyFolderPrompt, setCompanyFolderPrompt] = useState<{
+    companyId: number;
+    companyName: string;
+  } | null>(null);
+  const [companyFolderOptions, setCompanyFolderOptions] = useState<Record<string, string[]>>({});
+  const [newRuleForm, setNewRuleForm] = useState<{department: string; folderPath: string; type: 'allow'|'deny'}>({department: '', folderPath: '', type: 'allow'});
   const [companyDeptOptions, setCompanyDeptOptions] = useState<Record<number, string[]>>({});
   const [savingDetail, setSavingDetail] = useState(false);
   const [confirmUI, setConfirmUI] = useState<{
@@ -88,6 +95,46 @@ function UsersPageContent() {
     destructive?: boolean;
     onConfirm: () => void | Promise<void>;
   } | null>(null);
+
+  const [newFolderRule, setNewFolderRule] = useState<{ companyId: number | ''; department: string; folderPath: string; isExclusion: boolean }>({ companyId: '', department: '', folderPath: '', isExclusion: false });
+
+  const addFolderRule = (companyId: number) => {
+    if (!companyId || !newRuleForm.department || !newRuleForm.folderPath) return;
+    
+    // Determine exclusion based on current access
+    const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyId);
+    const hasFullDeptAccess = Boolean(companyRows.find((x: CompanyAccess) => x.department === newRuleForm.department));
+    const isExclusion = hasFullDeptAccess;
+
+    setDetailPermData((p: any) => ({
+      ...p,
+      folder_access: [
+        ...(p?.folder_access || []),
+        { company_id: companyId, department: newRuleForm.department, folder_path: newRuleForm.folderPath, is_exclusion: isExclusion }
+      ]
+    }));
+    setNewRuleForm({ ...newRuleForm, folderPath: '' });
+  };
+
+  const removeFolderRule = (idx: number) => {
+    setDetailPermData((p: any) => ({
+      ...p,
+      folder_access: (p?.folder_access || []).filter((_: any, i: number) => i !== idx)
+    }));
+  };
+
+  const fetchCompanyFolders = async (cid: number, dept: string) => {
+    if (!token || !cid || !dept) return;
+    const key = `${cid}_${dept}`;
+    if (companyFolderOptions[key]) return;
+    try {
+      const res = await fetch(apiUrl(`/api/folders?companyId=${cid}&department=${encodeURIComponent(dept)}`), {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const data = await res.json();
+      setCompanyFolderOptions(prev => ({ ...prev, [key]: Array.isArray(data) ? data : [] }));
+    } catch {}
+  };
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
   const companyId = searchParams.get('companyId');
@@ -213,16 +260,24 @@ function UsersPageContent() {
       can_bulk_rename: user.can_bulk_rename ?? true,
       can_bulk_download: user.can_bulk_download ?? true,
       can_upload_to_allowed: user.can_upload_to_allowed ?? false,
+      folder_access: user.folder_access || [],
     });
     setAccessPrompt(null);
     setCompanyDeptPrompt(null);
   };
 
   const saveUserDetails = async () => {
-    if (!selectedUser) return;
-    const roleDepartment = String(selectedUser.department || getDefaultDepartment() || '').trim();
+    if (!selectedUser || !detailPermData) return;
+    const normalizedCompanyAccess = (detailPermData?.company_access || [])
+      .filter((x: CompanyAccess) => Number.isFinite(x.company_id));
+    
+    if (normalizedCompanyAccess.length === 0) {
+      return setAlert({ title: 'Validation Error', message: 'You must assign the user to at least one company.', isError: true });
+    }
+
     setSavingDetail(true);
     try {
+      const roleDepartment = String(selectedUser.department || getDefaultDepartment() || '').trim();
       const roleRes = await fetch(apiUrl(`/api/users/${selectedUser.id}/role`), {
         method:'PUT',
         headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
@@ -247,19 +302,12 @@ function UsersPageContent() {
         }
       }
 
-      const normalizedCompanyAccess: CompanyAccess[] = (Array.isArray(detailPermData?.company_access) ? detailPermData.company_access : [])
-        .map((x: any) => ({
-          ...x,
-          company_id: Number(x?.company_id),
-          department: String(x?.department || selectedUser.department || departments[0] || '').trim(),
-          can_upload: Boolean(x?.can_upload),
-          is_primary: Boolean(x?.is_primary),
-        }))
-        .filter((x: CompanyAccess) => Number.isFinite(x.company_id) && Boolean(x.department));
+      // Normalized array is already defined at the start of the function
       const mergedAllowedDepartments = Array.from(
         new Set([
-          ...(detailPermData?.allowed_departments || []),
-          ...normalizedCompanyAccess.map((x) => String(x.department || '').trim()),
+          ...Object.keys(detailPermData?.dept_upload_permissions || {}),
+          ...normalizedCompanyAccess.map((x: any) => String(x.department || '').trim()),
+          ...(detailPermData?.folder_access || []).map((x: any) => String(x.department || '').trim()),
         ].map((d) => String(d || '').trim()).filter(Boolean))
       );
 
@@ -267,6 +315,7 @@ function UsersPageContent() {
         ...detailPermData,
         allowed_departments: mergedAllowedDepartments,
         company_access: normalizedCompanyAccess,
+        folder_access: detailPermData?.folder_access || [],
         preference_updates: {
           department_upload_permissions: detailPermData?.dept_upload_permissions || {}
         }
@@ -311,11 +360,12 @@ function UsersPageContent() {
     e.preventDefault(); setSubmitting(true);
     const primaryCompanyId = Number((form as any).primary_company_id);
     const primaryDepartment = String((form as any).department || '').trim() || departments[0] || '';
+    const isFolderOnly = Boolean((form as any).folder_path);
     const mergedAccess: CompanyAccess[] = [
       {
         company_id: primaryCompanyId,
         company_name: companies.find((c) => c.id === primaryCompanyId)?.name,
-        department: primaryDepartment,
+        department: isFolderOnly ? '' : primaryDepartment,
         can_upload: true,
         is_primary: true,
       },
@@ -327,6 +377,12 @@ function UsersPageContent() {
       ...form,
       primary_company_id: primaryCompanyId,
       company_access: mergedAccess,
+      folder_access: (form as any).folder_path ? [{
+        company_id: primaryCompanyId,
+        department: primaryDepartment,
+        folder_path: (form as any).folder_path,
+        is_exclusion: false
+      }] : []
     };
     const res = await fetch(apiUrl('/api/auth/register'), {
       method:'POST', headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
@@ -433,6 +489,8 @@ function UsersPageContent() {
       return {
         ...p,
         allowed_departments: (p?.allowed_departments || []).filter((d: string) => d !== dept),
+        company_access: (p?.company_access || []).filter((x: any) => x.department !== dept),
+        folder_access: (p?.folder_access || []).filter((x: any) => x.department !== dept),
         dept_upload_permissions: nextUpload,
       };
     });
@@ -477,6 +535,16 @@ function UsersPageContent() {
       if (!checked) {
         if (idx === -1) return p;
         const next = current.filter((_, i) => i !== idx);
+        const companyRowsAfter = next.filter((x) => Number(x.company_id) === companyId);
+        if (companyRowsAfter.length === 0) {
+           next.push({
+             company_id: companyId,
+             company_name: companyName,
+             department: '',
+             can_upload: false,
+             is_primary: next.length === 0
+           });
+        }
         if (next.length > 0 && !next.some((x) => x.is_primary)) next[0].is_primary = true;
         return { ...p, company_access: next };
       }
@@ -696,6 +764,16 @@ function UsersPageContent() {
                               >
                                 Departments
                               </button>
+                              <button
+                                disabled={!enabled}
+                                onClick={async () => {
+                                  await fetchCompanyDepartments(company.id, true);
+                                  setCompanyFolderPrompt({ companyId: company.id, companyName: company.name });
+                                }}
+                                className="px-2.5 py-1.5 rounded-[8px] text-[11px] border bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] disabled:opacity-45 disabled:cursor-not-allowed"
+                              >
+                                Folders
+                              </button>
                             </div>
                           </div>
                         )}
@@ -708,6 +786,8 @@ function UsersPageContent() {
                 </div>
               </div>
             </div>
+
+            {/* Folder rules block removed */}
 
             <div className="px-8 pb-5">
               <div className="rounded-[16px] border border-[var(--border-subtle)] p-4 bg-[var(--bg-elevated)]/30">
@@ -860,6 +940,125 @@ function UsersPageContent() {
                 </div>
               </div>
             )}
+
+            {companyFolderPrompt && (
+              <div className="absolute inset-0 bg-black/35 flex items-center justify-center p-4 z-50">
+                <div className="w-full max-w-[600px] rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-[var(--shadow-medium)] p-4 flex flex-col max-h-[90vh]">
+                  <div className="flex items-center justify-between mb-3 shrink-0">
+                    <div>
+                      <p className="text-[16px] font-semibold text-[var(--text-primary)]">{companyFolderPrompt.companyName}</p>
+                      <p className="text-[12px] text-[var(--text-secondary)]">Manage folder access for this company</p>
+                    </div>
+                    <button onClick={() => setCompanyFolderPrompt(null)} className="w-8 h-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-neutral)] flex items-center justify-center">
+                      <X size={13} />
+                    </button>
+                  </div>
+
+                  <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4">
+                    {/* Active Folder Rules */}
+                    <div>
+                      <p className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.08em] mb-2">Active Folder Rules</p>
+                      <div className="space-y-2">
+                        {(detailPermData?.folder_access || []).filter((fa: any) => fa.company_id === companyFolderPrompt.companyId).map((fa: any, idx: number) => {
+                           // Find real index in the global array to remove it correctly
+                           const realIdx = detailPermData.folder_access.findIndex((x: any) => x === fa);
+                           return (
+                             <div key={idx} className="flex items-center justify-between bg-[var(--bg-elevated)]/30 border border-[var(--border-subtle)] rounded-[10px] p-2.5">
+                               <div className="flex items-center gap-2">
+                                 <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${fa.is_exclusion ? 'bg-[#ff3b30]/10 text-[#ff3b30]' : 'bg-[#34c759]/10 text-[#34c759]'}`}>
+                                   {fa.is_exclusion ? 'EXCLUDE' : 'INCLUDE'}
+                                 </span>
+                                 <span className="text-[13px] font-medium text-[var(--text-primary)]">{fa.department} › <span className="font-bold">{fa.folder_path}</span></span>
+                               </div>
+                               <button onClick={() => removeFolderRule(realIdx)} className="text-[var(--text-tertiary)] hover:text-[#ff3b30] p-1">
+                                 <X size={14} />
+                               </button>
+                             </div>
+                           );
+                        })}
+                        {!(detailPermData?.folder_access || []).some((fa: any) => fa.company_id === companyFolderPrompt.companyId) && (
+                          <p className="text-[13px] text-[var(--text-tertiary)] italic">No folder rules active for this company.</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Add New Rule Form */}
+                    <div className="bg-[var(--bg-neutral)]/50 border border-[var(--border-subtle)] rounded-[12px] p-3 flex flex-col gap-3">
+                      <p className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.08em]">Add New Rule</p>
+                      
+                      <div className="flex flex-col sm:flex-row items-end gap-2">
+                        <div className="flex-1 w-full">
+                          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Department</label>
+                          <CustomSelect 
+                            value={newRuleForm.department} 
+                            onChange={(val) => {
+                              const dept = val;
+                              const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyFolderPrompt.companyId);
+                              const hasFullDeptAccess = Boolean(companyRows.find((x: CompanyAccess) => x.department === dept));
+                              
+                              setNewRuleForm({ 
+                                ...newRuleForm, 
+                                department: dept, 
+                                folderPath: '',
+                                type: hasFullDeptAccess ? 'deny' : 'allow'
+                              });
+                              if (dept) fetchCompanyFolders(companyFolderPrompt.companyId, dept);
+                            }}
+                            options={(companyDeptOptions[companyFolderPrompt.companyId] || []).map(d => ({ label: d, value: d }))}
+                            placeholder="Select Dept"
+                          />
+                        </div>
+
+                        <div className="flex-1 w-full">
+                          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Folder</label>
+                          <CustomSelect 
+                            value={newRuleForm.folderPath}
+                            onChange={(val) => setNewRuleForm({...newRuleForm, folderPath: val})}
+                            disabled={!newRuleForm.department}
+                            options={(companyFolderOptions[`${companyFolderPrompt.companyId}_${newRuleForm.department}`] || []).map(f => ({ label: f, value: f }))}
+                            placeholder="Select Folder"
+                          />
+                        </div>
+
+                        <div className="flex-1 w-full sm:w-auto min-w-[100px]">
+                          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Rule Type</label>
+                          {(() => {
+                             const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyFolderPrompt.companyId);
+                             const hasFullDeptAccess = Boolean(companyRows.find((x: CompanyAccess) => x.department === newRuleForm.department));
+                             
+                             return (
+                               <div className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-4 text-[14px] text-[var(--text-tertiary)] flex items-center h-[42px] cursor-not-allowed">
+                                 {newRuleForm.department ? (hasFullDeptAccess ? 'Exclude' : 'Include') : '-'}
+                               </div>
+                             );
+                          })()}
+                        </div>
+
+                        <button 
+                          onClick={() => addFolderRule(companyFolderPrompt.companyId)}
+                          disabled={!newRuleForm.department || !newRuleForm.folderPath}
+                          className="w-full sm:w-auto px-3 py-1.5 rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[12px] font-semibold disabled:opacity-50"
+                        >
+                          Add
+                        </button>
+                      </div>
+                      
+                      {(() => {
+                         if (!newRuleForm.department) return null;
+                         const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyFolderPrompt.companyId);
+                         const hasFullDeptAccess = Boolean(companyRows.find((x: CompanyAccess) => x.department === newRuleForm.department));
+                         if (hasFullDeptAccess) {
+                           return <p className="text-[11px] text-[var(--text-secondary)]">The user has full access to this department. You can only select folders to exclude from their view.</p>;
+                         }
+                         return <p className="text-[11px] text-[var(--text-secondary)]">The user does NOT have full access to this department. You can select folders to explicitly include for them.</p>;
+                      })()}
+                    </div>
+                  </div>
+
+                  <button onClick={() => setCompanyFolderPrompt(null)} className="w-full mt-3 py-2.5 rounded-[10px] text-[13px] font-semibold border border-[var(--border-subtle)] bg-[var(--bg-neutral)] text-[var(--text-secondary)] shrink-0">Done</button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -910,15 +1109,29 @@ function UsersPageContent() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3 z-40">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-3 z-40">
                 <div>
                   <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Department</label>
                   <CustomSelect 
                     value={(form as any).department} 
-                    onChange={val => setForm(p => ({...p, department: val}))}
+                    onChange={val => {
+                        setForm(p => ({...p, department: val, folder_path: ''})); 
+                        if (val && (form as any).primary_company_id) fetchCompanyFolders(Number((form as any).primary_company_id), val);
+                    }}
                     options={(((form as any).primary_company_id && companyDeptOptions[Number((form as any).primary_company_id)]) 
                       ? companyDeptOptions[Number((form as any).primary_company_id)]
                       : departments).map(o => ({ label: o, value: o }))
+                    }
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Folder (Optional)</label>
+                  <CustomSelect 
+                    value={(form as any).folder_path || ''} 
+                    onChange={val => setForm(p => ({...p, folder_path: val}))}
+                    options={((form as any).primary_company_id && (form as any).department) 
+                      ? (companyFolderOptions[`${(form as any).primary_company_id}_${(form as any).department}`] || []).map(f => ({ label: f, value: f })) 
+                      : []
                     }
                   />
                 </div>
@@ -951,13 +1164,12 @@ function UsersPageContent() {
             </p>
             <div className="mt-3">
               <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Department</label>
-              <select
+              <CustomSelect
                 value={createCompanyPrompt.department}
-                onChange={(e) => setCreateCompanyPrompt((p) => p ? { ...p, department: e.target.value } : p)}
-                className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] py-2.5 px-3 text-[13px] text-[var(--text-primary)]"
-              >
-                {departments.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
+                onChange={(val) => setCreateCompanyPrompt((p) => p ? { ...p, department: val } : p)}
+                options={departments.map(d => ({ label: d, value: d }))}
+                placeholder="-- Select Default Dept --"
+              />
             </div>
             <div className="mt-5 flex gap-2">
               <button type="button" onClick={() => applyCreateCompanyAccess(false)} className="flex-1 py-2.5 rounded-[10px] bg-[var(--bg-neutral)] text-[14px] font-bold text-[var(--text-secondary)] border border-[var(--border-subtle)]">

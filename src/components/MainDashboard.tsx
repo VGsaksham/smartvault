@@ -117,6 +117,7 @@ export default function MainDashboard() {
 
   // Preview State
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [imageZoomed, setImageZoomed] = useState(false);
   const [textContent, setTextContent] = useState<string | null>(null);
   const codeRef = useRef<HTMLElement>(null);
 
@@ -337,12 +338,20 @@ export default function MainDashboard() {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
         const parsedUser = storedUser ? JSON.parse(storedUser) : null;
-        setUserRole(payload.role);
-        setUserDept(payload.department);
-        setUserAllowedDepts(parsedUser?.allowed_departments || payload.allowed_departments || []);
+        setUserRole(parsedUser?.role || payload.role);
+        setUserDept(parsedUser?.department || payload.department);
+        let allAllowed = parsedUser?.allowed_departments || payload.allowed_departments || [];
+        if (parsedUser?.company_access) {
+          allAllowed = [...allAllowed, ...parsedUser.company_access.map((x: any) => x.department)];
+        }
+        if (parsedUser?.folder_access) {
+          allAllowed = [...allAllowed, ...parsedUser.folder_access.map((x: any) => x.department)];
+        }
+        setUserAllowedDepts([...new Set(allAllowed)]);
         setUserId(parsedUser?.id || payload.id);
       } catch (e) {
-        console.error('Invalid token payload');
+        console.error('Invalid token payload', e);
+        localStorage.clear();
       }
     }
   }, []);
@@ -518,6 +527,7 @@ export default function MainDashboard() {
     let url: string | null = null;
     setTextContent(null);
     setPreviewUrl(null);
+    setImageZoomed(false);
 
     if (!selectedFile) return;
 
@@ -1788,16 +1798,23 @@ export default function MainDashboard() {
             </div>
 
             {/* Viewer Content Area */}
-            <div className="flex-1 overflow-auto bg-[var(--bg-app)] flex items-center justify-center p-3 sm:p-6">
+            <div className="flex-1 overflow-auto bg-[var(--bg-app)] flex items-center justify-center p-3 sm:p-6 relative group">
               {selectedFile.mime_type?.includes('image') ? (
                 previewUrl ? (
-                  <img 
-                    src={previewUrl} 
-                    alt={selectedFile.original_name}
-                    className="max-w-full max-h-full object-contain rounded-[8px] shadow-[0_8px_32px_rgba(0,0,0,0.12)] cursor-zoom-in"
-                  />
+                  <div 
+                    className={`overflow-auto flex items-center justify-center transition-all duration-300 w-full h-full ${imageZoomed ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
+                    onClick={() => setImageZoomed(!imageZoomed)}
+                  >
+                    <img 
+                      src={previewUrl} 
+                      alt={selectedFile.original_name}
+                      className={`rounded-[8px] shadow-[0_8px_32px_rgba(0,0,0,0.12)] transition-transform duration-300 origin-center ${imageZoomed ? 'scale-[2.5] object-none' : 'max-w-full max-h-full object-contain'}`}
+                    />
+                  </div>
                 ) : (
-                  <div className="w-8 h-8 border-[3px] border-[rgba(0,0,0,0.08)] border-t-[#0066cc] rounded-full animate-spin"></div>
+                  <div className="flex flex-col items-center gap-3">
+                    <div className="w-8 h-8 border-[3px] border-[rgba(0,0,0,0.08)] border-t-[#0066cc] rounded-full animate-spin"></div>
+                  </div>
                 )
               ) : selectedFile.mime_type?.includes('video') ? (
                 previewUrl ? (

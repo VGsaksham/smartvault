@@ -48,8 +48,8 @@ export default function Sidebar() {
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
         const user = storedUser ? JSON.parse(storedUser) : null;
-        setUserRole(payload.role);
-        setUserDept(payload.department);
+        setUserRole(user?.role || payload.role);
+        setUserDept(user?.department || payload.department);
         setAllowedDepts(user?.allowed_departments || payload.allowed_departments || []);
       } catch (e) {
         console.error('Invalid token payload in Sidebar');
@@ -150,13 +150,9 @@ export default function Sidebar() {
     { name: 'Admin Dashboard', path: '/admin', params: {}, icon: LayoutDashboard, adminOnly: true },
     { name: 'Backups', path: '/admin/backups', params: {}, icon: Database, adminOnly: true },
     { name: 'Departments & Folders', path: '/admin/structure', params: {}, icon: Layers, adminOnly: true },
-  ].filter(v => !v.adminOnly || userRole === 'Admin');
+  ].filter(v => !v.adminOnly || userRole?.toLowerCase() === 'admin');
 
   const departments = (structureDepts.length > 0 ? structureDepts : [])
-    .filter((name) => {
-      if (userRole === 'Admin') return true;
-      return name === userDept || allowedDepts.includes(name);
-    })
     .map((name) => ({
       name,
       path: '/',
@@ -271,3 +267,4 @@ export default function Sidebar() {
     </>
   );
 }
+
