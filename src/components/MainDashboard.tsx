@@ -347,7 +347,7 @@ export default function MainDashboard() {
         if (parsedUser?.folder_access) {
           allAllowed = [...allAllowed, ...parsedUser.folder_access.map((x: any) => x.department)];
         }
-        setUserAllowedDepts([...new Set(allAllowed)]);
+        setUserAllowedDepts([...new Set(allAllowed)] as string[]);
         setUserId(parsedUser?.id || payload.id);
       } catch (e) {
         console.error('Invalid token payload', e);
