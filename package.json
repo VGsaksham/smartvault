@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "next start -H 0.0.0.0",
     "lint": "eslint",
     "push": "node scripts/push.mjs"
   },
@@ -26,6 +26,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.4",
+    "node-ssh": "^13.2.1",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
