@@ -4,7 +4,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
+    "dev": "nodemon server.js",
+    "migrate": "node run-migrations.js",
     "preflight": "node check_db.js preflight",
     "db:migrate": "bash scripts/db-migrate.sh",
     "search:reindex": "node scripts/search-reindex.js",
