@@ -514,9 +514,6 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
     const fyCheck = await pool.query('SELECT status FROM financial_years WHERE id = $1', [fyId]);
     if (fyCheck.rows.length > 0) {
       const fyStatus = fyCheck.rows[0].status;
-      if (fyStatus === 'Archived') {
-        return res.status(403).json({ error: "This Financial Year is Archived. Uploads are disabled. Contact Admin to unlock." });
-      }
       if (fyStatus === 'Locked') {
         return res.status(403).json({ error: "This Financial Year is Locked. No modifications are permitted." });
       }
@@ -1656,10 +1653,25 @@ app.delete('/api/files/:id', verifyToken, async (req, res) => {
   }
 
   try {
-    const result = await pool.query('SELECT minio_filename, original_name FROM vault_files WHERE id = $1', [req.params.id]);
+    const result = await pool.query(`
+      SELECT f.minio_filename, f.original_name, fy.status as fy_status
+      FROM vault_files f
+      LEFT JOIN vault_file_metadata m ON m.file_id = f.id
+      LEFT JOIN financial_years fy ON fy.id = m.fy_id
+      WHERE f.id = $1
+    `, [req.params.id]);
+    
     if (result.rows.length === 0) return res.status(404).json({ error: "File not found" });
 
     const fileRecord = result.rows[0];
+    
+    // FY state check
+    if (fileRecord.fy_status === 'Locked') {
+      return res.status(403).json({ error: "Cannot delete file: Financial Year is Locked." });
+    }
+    if (fileRecord.fy_status === 'Archived') {
+      return res.status(403).json({ error: "Cannot delete file: Financial Year is Archived." });
+    }
     const isLocal = fileRecord.minio_filename.startsWith('local:');
     const actualFileName = isLocal ? fileRecord.minio_filename.substring(6) : fileRecord.minio_filename;
 
@@ -1736,7 +1748,13 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
     const undoEntries = [];
 
     for (const fileId of fileIds) {
-      const result = await client.query('SELECT * FROM vault_files WHERE id = $1', [fileId]);
+      const result = await client.query(`
+        SELECT f.*, fy.status as fy_status 
+        FROM vault_files f
+        LEFT JOIN vault_file_metadata m ON m.file_id = f.id
+        LEFT JOIN financial_years fy ON fy.id = m.fy_id
+        WHERE f.id = $1
+      `, [fileId]);
       if (result.rows.length === 0) {
         throw new Error(`File ID ${fileId} not found`);
       }
@@ -1746,6 +1764,14 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
 
       if (!hasPermission) {
         throw new Error(`Permission denied for file: ${fileRecord.original_name}`);
+      }
+      
+      // FY state checks
+      if (fileRecord.fy_status === 'Locked') {
+        throw new Error(`Financial Year is Locked for file: ${fileRecord.original_name}`);
+      }
+      if (fileRecord.fy_status === 'Archived' && ['DELETE', 'MOVE', 'RENAME', 'TAG', 'EXPIRY', 'DELETE_COPIES'].includes(action)) {
+        throw new Error(`Financial Year is Archived. Only copying is allowed for file: ${fileRecord.original_name}`);
       }
 
       switch (action) {

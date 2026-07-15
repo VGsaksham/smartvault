@@ -128,7 +128,7 @@ function UsersPageContent() {
     const key = `${cid}_${dept}`;
     if (companyFolderOptions[key]) return;
     try {
-      const res = await fetch(apiUrl(`/api/folders?companyId=${cid}&department=${encodeURIComponent(dept)}`), {
+      const res = await fetch(apiUrl(`/api/admin/folders?companyId=${cid}&department=${encodeURIComponent(dept)}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
@@ -914,7 +914,6 @@ function UsersPageContent() {
                                   Read
                                 </button>
                                 <button
-                                  disabled={companyReadOnly}
                                   onClick={() => setCompanyDepartmentMode(companyDeptPrompt.companyId, dept, true)}
                                   className={`px-2.5 py-1.5 rounded-[8px] text-[11px] border disabled:opacity-45 disabled:cursor-not-allowed ${
                                     deptCanUpload

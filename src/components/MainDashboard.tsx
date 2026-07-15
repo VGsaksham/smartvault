@@ -1864,17 +1864,73 @@ export default function MainDashboard() {
                   </div>
                 )
               ) : textContent !== null ? (
-                <div className="w-full h-full overflow-auto bg-[#ffffff] rounded-[8px] border border-[rgba(0,0,0,0.08)] no-invert" style={{ minHeight: '100%' }}>
-                  <div className="flex items-center justify-between px-4 py-2 bg-[#f5f5f7] border-b border-[rgba(0,0,0,0.06)]">
-                    <span className="text-[12px] font-mono text-[rgba(0,0,0,0.48)]">{selectedFile.original_name}</span>
-                    <span className="text-[11px] text-[rgba(0,0,0,0.32)]">{textContent.split('\n').length} lines</span>
+                selectedFile.original_name?.toLowerCase().endsWith('.csv') ? (
+                  <div className="w-full h-full overflow-auto bg-[#ffffff] rounded-[8px] border border-[rgba(0,0,0,0.08)] no-invert flex flex-col" style={{ minHeight: '100%' }}>
+                    <div className="flex items-center justify-between px-4 py-2 bg-[#f5f5f7] border-b border-[rgba(0,0,0,0.06)] shrink-0">
+                      <span className="text-[12px] font-mono text-[rgba(0,0,0,0.48)]">{selectedFile.original_name}</span>
+                      <span className="text-[11px] text-[rgba(0,0,0,0.32)]">{textContent.split('\n').filter(l => l.trim()).length - 1} rows</span>
+                    </div>
+                    <div className="flex-1 overflow-auto w-full">
+                      <table className="w-full text-left border-collapse text-[13px]">
+                        <thead className="sticky top-0 bg-[#f5f5f7] shadow-[0_1px_0_rgba(0,0,0,0.08)] z-10">
+                          <tr>
+                            {(() => {
+                              const lines = textContent.split('\n').filter(l => l.trim());
+                              if (!lines.length) return null;
+                              const headers = lines[0].split(',').map(h => h.replace(/^"|"$/g, ''));
+                              return headers.map((h, i) => (
+                                <th key={i} className="py-2 px-3 font-semibold text-[#1d1d1f] border-r border-[rgba(0,0,0,0.08)] last:border-r-0 whitespace-nowrap bg-[#f5f5f7]">{h}</th>
+                              ));
+                            })()}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            const lines = textContent.split('\n').filter(l => l.trim());
+                            if (lines.length < 2) return null;
+                            const parseCSVLine = (line: string) => {
+                              const result = [];
+                              let current = '';
+                              let inQuotes = false;
+                              for (let i = 0; i < line.length; i++) {
+                                const char = line[i];
+                                if (char === '"') inQuotes = !inQuotes;
+                                else if (char === ',' && !inQuotes) {
+                                  result.push(current);
+                                  current = '';
+                                } else current += char;
+                              }
+                              result.push(current);
+                              return result;
+                            };
+                            return lines.slice(1).map((line, rowIdx) => {
+                              const cells = parseCSVLine(line);
+                              return (
+                                <tr key={rowIdx} className="border-b border-[rgba(0,0,0,0.04)] hover:bg-[#f9f9fb] transition-colors">
+                                  {cells.map((cell, colIdx) => (
+                                    <td key={colIdx} className="py-2 px-3 text-[#1d1d1f] border-r border-[rgba(0,0,0,0.04)] last:border-r-0 whitespace-nowrap">{cell}</td>
+                                  ))}
+                                </tr>
+                              );
+                            });
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                  <pre className="p-4 overflow-auto text-[13px] leading-[1.6] m-0" style={{ fontFamily: '"SF Mono", "Fira Code", monospace' }}>
-                    <code ref={codeRef} className={`language-${selectedFile.original_name?.split('.').pop()?.toLowerCase() || 'text'}`}>
-                      {textContent}
-                    </code>
-                  </pre>
-                </div>
+                ) : (
+                  <div className="w-full h-full overflow-auto bg-[#ffffff] rounded-[8px] border border-[rgba(0,0,0,0.08)] no-invert" style={{ minHeight: '100%' }}>
+                    <div className="flex items-center justify-between px-4 py-2 bg-[#f5f5f7] border-b border-[rgba(0,0,0,0.06)] shrink-0">
+                      <span className="text-[12px] font-mono text-[rgba(0,0,0,0.48)]">{selectedFile.original_name}</span>
+                      <span className="text-[11px] text-[rgba(0,0,0,0.32)]">{textContent.split('\n').length} lines</span>
+                    </div>
+                    <pre className="p-4 overflow-auto text-[13px] leading-[1.6] m-0" style={{ fontFamily: '"SF Mono", "Fira Code", monospace' }}>
+                      <code ref={codeRef} className={`language-${selectedFile.original_name?.split('.').pop()?.toLowerCase() || 'text'}`}>
+                        {textContent}
+                      </code>
+                    </pre>
+                  </div>
+                )
               ) : isCodeFile(selectedFile.original_name) || selectedFile.mime_type?.includes('text') ? (
                 <div className="flex flex-col items-center gap-3">
                   <div className="w-8 h-8 border-[3px] border-[rgba(0,0,0,0.08)] border-t-[#0066cc] rounded-full animate-spin"></div>

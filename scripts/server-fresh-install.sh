@@ -25,9 +25,13 @@ CORS_ORIGINS="${CORS_ORIGINS:-http://${LAN_IP},http://${LAN_IP}:3000}"
 echo "=== SmartVault fresh install ==="
 echo "APP_DIR=$APP_DIR  LAN_IP=$LAN_IP"
 
-sudo apt update && sudo apt upgrade -y
+export DEBIAN_FRONTEND=noninteractive
+export NEEDRESTART_MODE=a
+export NEEDRESTART_SUSPEND=1
+sudo apt-get update -qq
+sudo apt-get install -y curl ca-certificates
 curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt install -y nodejs postgresql postgresql-contrib nginx libreoffice git curl
+sudo apt-get install -y nodejs postgresql postgresql-contrib nginx libreoffice git curl
 sudo npm install -g pm2
 
 curl -fsSL https://dl.min.io/server/minio/release/linux-amd64/minio -o /tmp/minio
@@ -116,7 +120,7 @@ npm run preflight || true
 # Frontend
 cd "$APP_DIR"
 [[ -f .env.local ]] || echo "NEXT_PUBLIC_API_BASE_URL=" > .env.local
-npm ci
+npm install
 npm run build
 
 # PM2

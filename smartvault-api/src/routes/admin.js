@@ -120,6 +120,30 @@ router.get('/structure', verifyToken, async (req, res) => {
   }
 });
 
+router.get('/folders', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
+  const companyId = Number(req.query.companyId);
+  const departmentName = String(req.query.department || '').trim();
+  if (!Number.isFinite(companyId) || !departmentName) return bad(res, 'companyId and department are required.');
+  try {
+    const deptRes = await pool.query(
+      `SELECT id FROM company_departments WHERE company_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+      [companyId, departmentName]
+    );
+    if (deptRes.rows.length === 0) return res.json([]);
+    const deptId = deptRes.rows[0].id;
+    const folderRows = await pool.query(
+      `SELECT id FROM company_department_folders WHERE department_id = $1`,
+      [deptId]
+    );
+    const paths = await Promise.all(folderRows.rows.map(r => getFolderFullPath(pool, r.id)));
+    paths.sort((a, b) => a.localeCompare(b));
+    res.json(paths);
+  } catch (err) {
+    res.status(500).json({ error: `Failed to load folders: ${err.message}` });
+  }
+});
+
 router.post('/structure/departments', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
   const companyId = Number(req.body.company_id);

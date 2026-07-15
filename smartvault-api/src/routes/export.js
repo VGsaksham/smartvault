@@ -129,7 +129,7 @@ router.get('/user-aliases/export/folders', verifyToken, async (req, res) => {
       if (!f) return '';
       if (!f.parent_folder_id) return f.name;
       const parent = getPath(f.parent_folder_id);
-      return parent ? `${parent}/${f.name}` : f.name;
+      return parent ? `${parent} > ${f.name}` : f.name;
     };
 
     let csv = 'Folder ID,Folder Path,My Name\n';
