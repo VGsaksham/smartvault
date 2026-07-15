@@ -1701,7 +1701,7 @@ export default function MainDashboard() {
                     <button onClick={(e) => { e.stopPropagation(); toggleStar(file.id); }}>
                       <Star
                         size={18}
-                        className={`transition-colors ${starredIds.has(file.id) ? 'text-[#ffcc00] fill-[#ffcc00]' : 'text-[rgba(0,0,0,0.15)] hover:text-[#ffcc00] hover:fill-[#ffcc00]'}`}
+                        className={`transition-all duration-200 hover:scale-110 active:scale-[1.4] ${starredIds.has(file.id) ? 'text-[#ffcc00] fill-[#ffcc00] star-anim-active' : 'text-[rgba(0,0,0,0.15)] hover:text-[#ffcc00] hover:fill-[#ffcc00]'}`}
                       />
                     </button>
                   </div>
