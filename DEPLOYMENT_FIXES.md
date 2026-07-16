@@ -27,3 +27,5 @@ This document tracks all the critical deployment and schema fixes we've applied 
 - **Fix**: Added `router.get('/folders')` to `smartvault-api/src/routes/admin.js` to properly return the folder paths for a department, and updated the frontend to call `/api/admin/folders`.
 
 - **Financial Year Archived/Locked Logic**: Allowed file uploads to Archived Financial Years while strictly preventing deletion, moving, renaming, and tagging. Locked Financial Years remain completely immutable.
+
+- **Infinite Reload Loop**: Fixed an issue where the frontend AuthHeartbeat would infinitely reload the page. This happened randomly because PostgreSQL doesn't guarantee the order of returned rows without an ORDER BY clause. Added ORDER BY to folder_access and department_permissions queries in the backend accessService to make the user payload 100% deterministic.

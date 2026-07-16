@@ -61,7 +61,8 @@ async function getEffectiveUserSettings(userId, db = pool) {
   const deptPermissionResult = await db.query(
     `SELECT department, can_upload
      FROM user_department_permissions
-     WHERE user_id = $1`,
+     WHERE user_id = $1
+     ORDER BY department ASC`,
     [userId]
   );
 
@@ -81,7 +82,8 @@ async function getEffectiveUserSettings(userId, db = pool) {
   const folderAccessResult = await db.query(
     `SELECT company_id, department, folder_path, is_exclusion
      FROM user_folder_access
-     WHERE user_id = $1`,
+     WHERE user_id = $1
+     ORDER BY company_id ASC, department ASC, folder_path ASC`,
     [userId]
   ).catch(() => ({ rows: [] }));
 
