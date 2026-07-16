@@ -32,3 +32,5 @@ This document tracks all the critical deployment and schema fixes we've applied 
 
 - **Department Update Error**: Fixed an issue where renaming a department failed due to the missing 'updated_at' column in the 'company_departments' table by adding the column directly into the PostgreSQL database schema.
 - **Dynamic Folder Layout Toggle**: Updated the layout toggle (Grid/List views) in the File Dashboard to correctly apply the layout view to the folder elements (now displaying folders as list items when the list view is toggled, similar to files).
+
+- **Folder Update Error**: Fixed a similar issue where renaming a folder failed due to the missing 'updated_at' column in the 'company_department_folders' table by adding the column directly into the PostgreSQL database schema.
