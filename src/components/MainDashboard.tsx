@@ -1530,63 +1530,121 @@ export default function MainDashboard() {
                 )}
               </div>
 
-              {/* Folder cards: show subfolders of current level */}
+              {/* Folder display */}
               {dynamicFolders.length > 0 && (
-                <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-6 md:mb-8">
-                  {dynamicFolders.map(folderPath => {
-                    const folderName = folderAliasMap[`${activeDepartment}::${folderPath}`]?.split('/').pop() || folderPath.split('/').pop() || folderPath;
-                    // Count files at this exact path AND files in any sub-path
-                    const folderCount = Array.isArray(files)
-                      ? files.filter(f =>
-                          f.department === activeDepartment &&
-                          (f.folder === folderPath || String(f.folder || '').startsWith(folderPath + '/'))
-                        ).length
-                      : 0;
-                    const directFileCount = Array.isArray(files)
-                      ? files.filter(f => f.department === activeDepartment && f.folder === folderPath).length
-                      : 0;
-                    return (
-                      <div
-                        key={folderPath}
-                        onClick={() => {
-                          const params = new URLSearchParams(searchParams);
-                          params.set('folder', folderPath);
-                          setActiveFolder(folderPath);
-                          router.replace(`${pathname}?${params.toString()}`);
-                        }}
-                        className="group bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[14px] p-4 flex flex-col items-start gap-3 hover:border-[var(--accent)] hover:shadow-[var(--shadow-medium)] transition-all text-left cursor-pointer"
-                      >
-                        <div className="w-full flex justify-between items-start">
-                          <div className="w-10 h-10 rounded-[10px] bg-[var(--bg-neutral)] flex items-center justify-center group-hover:bg-[var(--bg-elevated)] transition-colors">
-                            <Folder size={20} className="text-black dark:text-zinc-500 opacity-80" />
+                viewMode === 'grid' ? (
+                  <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-6 md:mb-8">
+                    {dynamicFolders.map(folderPath => {
+                      const folderName = folderAliasMap[`${activeDepartment}::${folderPath}`]?.split('/').pop() || folderPath.split('/').pop() || folderPath;
+                      // Count files at this exact path AND files in any sub-path
+                      const folderCount = Array.isArray(files)
+                        ? files.filter(f =>
+                            f.department === activeDepartment &&
+                            (f.folder === folderPath || String(f.folder || '').startsWith(folderPath + '/'))
+                          ).length
+                        : 0;
+                      const directFileCount = Array.isArray(files)
+                        ? files.filter(f => f.department === activeDepartment && f.folder === folderPath).length
+                        : 0;
+                      return (
+                        <div
+                          key={folderPath}
+                          onClick={() => {
+                            const params = new URLSearchParams(searchParams);
+                            params.set('folder', folderPath);
+                            setActiveFolder(folderPath);
+                            router.replace(`${pathname}?${params.toString()}`);
+                          }}
+                          className="group bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[14px] p-4 flex flex-col items-start gap-3 hover:border-[var(--accent)] hover:shadow-[var(--shadow-medium)] transition-all text-left cursor-pointer"
+                        >
+                          <div className="w-full flex justify-between items-start">
+                            <div className="w-10 h-10 rounded-[10px] bg-[var(--bg-neutral)] flex items-center justify-center group-hover:bg-[var(--bg-elevated)] transition-colors">
+                              <Folder size={20} className="text-black dark:text-zinc-500 opacity-80" />
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setQrFile({
+                                  isFolder: true,
+                                  original_name: folderPath,
+                                  department: activeDepartment,
+                                  id: `?dept=${encodeURIComponent(activeDepartment)}&folder=${encodeURIComponent(folderPath)}`
+                                });
+                              }}
+                              className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--bg-neutral)] transition-colors"
+                              title="Share Folder QR"
+                            >
+                              <QrCode size={16} />
+                            </button>
                           </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setQrFile({
-                                isFolder: true,
-                                original_name: folderPath,
-                                department: activeDepartment,
-                                id: `?dept=${encodeURIComponent(activeDepartment)}&folder=${encodeURIComponent(folderPath)}`
-                              });
-                            }}
-                            className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--bg-neutral)] transition-colors"
-                            title="Share Folder QR"
-                          >
-                            <QrCode size={16} />
-                          </button>
+                          <div>
+                            <p className="text-[14px] font-semibold text-[var(--text-primary)] leading-tight">{folderName}</p>
+                            <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">
+                              {directFileCount} file{directFileCount !== 1 ? 's' : ''}
+                              {folderCount > directFileCount && ` · ${folderCount - directFileCount} in subfolders`}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-[14px] font-semibold text-[var(--text-primary)] leading-tight">{folderName}</p>
-                          <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="flex flex-col border border-[var(--border-subtle)] rounded-[18px] bg-[var(--bg-surface)] overflow-hidden mb-6 md:mb-8">
+                    <div className="hidden sm:flex items-center px-4 md:px-6 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
+                      <div className="w-10"></div>
+                      <div className="flex-1 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Folder Name</div>
+                      <div className="w-32 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden sm:block">Items</div>
+                      <div className="w-12 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden md:block text-right pr-4">QR</div>
+                    </div>
+                    {dynamicFolders.map(folderPath => {
+                      const folderName = folderAliasMap[`${activeDepartment}::${folderPath}`]?.split('/').pop() || folderPath.split('/').pop() || folderPath;
+                      const folderCount = Array.isArray(files) ? files.filter(f => f.department === activeDepartment && (f.folder === folderPath || String(f.folder || '').startsWith(folderPath + '/'))).length : 0;
+                      const directFileCount = Array.isArray(files) ? files.filter(f => f.department === activeDepartment && f.folder === folderPath).length : 0;
+                      return (
+                        <div
+                          key={folderPath}
+                          onClick={() => {
+                            const params = new URLSearchParams(searchParams);
+                            params.set('folder', folderPath);
+                            setActiveFolder(folderPath);
+                            router.replace(`${pathname}?${params.toString()}`);
+                          }}
+                          className="flex items-center px-4 md:px-6 py-4 hover:bg-[var(--bg-neutral)] transition-colors border-b border-[rgba(0,0,0,0.04)] last:border-0 cursor-pointer"
+                        >
+                          <div className="w-10 flex items-center">
+                            <div className="w-8 h-8 rounded-[8px] bg-[var(--bg-neutral)] flex items-center justify-center">
+                              <Folder size={16} className="text-[var(--text-secondary)]" />
+                            </div>
+                          </div>
+                          <div className="flex-1 flex items-center gap-3 min-w-0">
+                            <span className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{folderName}</span>
+                          </div>
+                          <div className="w-32 hidden sm:flex text-[13px] text-[var(--text-secondary)]">
                             {directFileCount} file{directFileCount !== 1 ? 's' : ''}
-                            {folderCount > directFileCount && ` · ${folderCount - directFileCount} in subfolders`}
-                          </p>
+                            {folderCount > directFileCount && ` (${folderCount - directFileCount} sub)`}
+                          </div>
+                          <div className="w-12 hidden md:flex text-[13px] text-[var(--text-secondary)] justify-end pr-4">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setQrFile({
+                                  isFolder: true,
+                                  original_name: folderPath,
+                                  department: activeDepartment,
+                                  id: `?dept=${encodeURIComponent(activeDepartment)}&folder=${encodeURIComponent(folderPath)}`
+                                });
+                              }}
+                              className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--bg-neutral)] transition-colors"
+                              title="Share Folder QR"
+                            >
+                              <QrCode size={16} />
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )
               )}
             </div>
           )}

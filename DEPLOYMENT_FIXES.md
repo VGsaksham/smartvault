@@ -29,3 +29,6 @@ This document tracks all the critical deployment and schema fixes we've applied 
 - **Financial Year Archived/Locked Logic**: Allowed file uploads to Archived Financial Years while strictly preventing deletion, moving, renaming, and tagging. Locked Financial Years remain completely immutable.
 
 - **Infinite Reload Loop**: Fixed an issue where the frontend AuthHeartbeat would infinitely reload the page. This happened randomly because PostgreSQL doesn't guarantee the order of returned rows without an ORDER BY clause. Added ORDER BY to folder_access and department_permissions queries in the backend accessService to make the user payload 100% deterministic.
+
+- **Department Update Error**: Fixed an issue where renaming a department failed due to the missing 'updated_at' column in the 'company_departments' table by adding the column directly into the PostgreSQL database schema.
+- **Dynamic Folder Layout Toggle**: Updated the layout toggle (Grid/List views) in the File Dashboard to correctly apply the layout view to the folder elements (now displaying folders as list items when the list view is toggled, similar to files).
