@@ -1998,7 +1998,6 @@ const renderSearchPath = (file: any) => {
 
             {/* Viewer Content Area */}
             <div className="flex-1 overflow-auto bg-[var(--bg-app)] flex items-center justify-center p-3 sm:p-6 relative group">
-              {console.log("[Preview] selectedFile:", selectedFile) || ""}
               {selectedFile.mime_type?.toLowerCase().includes('image') ? (
                 previewUrl ? (
                   <div 
