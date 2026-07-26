@@ -760,7 +760,7 @@ function UsersPageContent() {
                               <button
                                 disabled={!enabled}
                                 onClick={async () => {
-                                  await fetchmasterfolderCategories(masterfolder.id, true);
+                                  await fetchmasterfolderCategories(masterfolder.id);
                                   setmasterfolderFolderPrompt({ masterfolderId: masterfolder.id, masterfolderName: masterfolder.name });
                                 }}
                                 className="px-2.5 py-1.5 rounded-[8px] text-[11px] border bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] disabled:opacity-45 disabled:cursor-not-allowed"
