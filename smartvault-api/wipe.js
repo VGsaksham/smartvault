@@ -9,7 +9,7 @@ async function wipe() {
     console.log('Wiping database tables...');
     // Delete in correct order to respect foreign keys or just use CASCADE where applicable
     // Or just TRUNCATE with CASCADE
-    await pool.query(`TRUNCATE TABLE companies CASCADE`);
+    await pool.query(`TRUNCATE TABLE masterfolders CASCADE`);
     await pool.query(`TRUNCATE TABLE vault_files CASCADE`);
     await pool.query(`TRUNCATE TABLE audit_logs CASCADE`);
     await pool.query(`TRUNCATE TABLE file_sequences CASCADE`);

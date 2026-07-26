@@ -1,15 +1,15 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useSearchParams, useRouter } from 'next/navigation';
 import { Clock } from 'lucide-react';
 import FileGrid from './FileGrid';
 import { apiUrl } from '@/lib/api';
 
 export default function RecentView() {
   const searchParams = useSearchParams();
-  const companyId = searchParams.get('companyId');
-  const fyId = searchParams.get('fyId');
+  const router = useRouter();
+  const masterfolderId = searchParams.get('masterfolderId');
 
   const [files, setFiles] = useState<any[]>([]);
   const [starredIds, setStarredIds] = useState<Set<number>>(new Set());
@@ -21,8 +21,8 @@ export default function RecentView() {
     setLoading(true);
 
     const params = new URLSearchParams();
-    if (companyId) params.set('companyId', companyId);
-    if (fyId) params.set('fyId', fyId);
+    if (masterfolderId) params.set('masterfolderId', masterfolderId);
+    
     const url = apiUrl(`/api/files/recent?${params.toString()}`);
 
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
@@ -34,7 +34,7 @@ export default function RecentView() {
       .then(r => r.json())
       .then(data => { if (Array.isArray(data)) setStarredIds(new Set(data.map((f: any) => f.id))); })
       .catch(() => {});
-  }, [companyId, fyId]);
+  }, [masterfolderId]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -54,12 +54,14 @@ export default function RecentView() {
   return (
     <FileGrid
       title="Recent"
-      subtitle={`Last 30 uploaded files · ${fyId ? 'current FY scope' : 'all FYs'}`}
+      subtitle="Last 30 uploaded files"
       titleIcon={<Clock className="text-[#0066cc]" size={20} />}
       files={files}
       starredIds={starredIds}
       onStarToggle={toggleStar}
-      onFileClick={() => {}}
+      onFileClick={(file) => {
+        router.push(`/?openFileId=${file.id}&masterfolderId=${file.masterfolder_id}`);
+      }}
       onRefresh={fetchData}
       loading={loading}
       emptyMessage="No recent files. Upload something to get started."

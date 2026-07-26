@@ -49,7 +49,7 @@ const env = {
     username: process.env.ADMIN_BOOTSTRAP_USERNAME || 'admin',
     email: process.env.ADMIN_BOOTSTRAP_EMAIL || '',
     password: String(process.env.ADMIN_BOOTSTRAP_PASSWORD || ''),
-    department: process.env.ADMIN_BOOTSTRAP_DEPARTMENT || 'Admin',
+    category: process.env.ADMIN_BOOTSTRAP_DEPARTMENT || 'Admin',
   },
   ROOT_DIR: path.resolve(__dirname, '..', '..'),
 };

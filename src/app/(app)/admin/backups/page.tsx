@@ -1,8 +1,9 @@
+
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Database, RefreshCw, RotateCcw, ShieldAlert, Sparkles } from 'lucide-react';
+import { Database, RefreshCw, RotateCcw, ShieldAlert, Sparkles, Settings } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
 import { useConfirm } from '@/components/ConfirmProvider';
 
@@ -32,6 +33,8 @@ type BackupConfig = {
   backup_storage_path: string;
   backup_cron: string;
   backup_retention_days: number;
+  enabled?: boolean;
+  interval?: string;
 };
 
 const fmtBytes = (bytes: number) => {
@@ -59,7 +62,67 @@ export default function AdminBackupsPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [config, setConfig] = useState<BackupConfig | null>(null);
 
+  // Granular Filters
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+  const [filters, setFilters] = useState({ masterfolder_id: '', category: '', folder: '' });
+  const [masterfolders, setMasterfolders] = useState<any[]>([]);
+  const [categories, setCategories] = useState<any[]>([]);
+  
+  // Fetch masterfolders
+  useEffect(() => {
+    if (!isAuthorized) return;
+    fetch(apiUrl('/api/masterfolders'), { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) setMasterfolders(data);
+      })
+      .catch(() => {});
+  }, [isAuthorized, token]);
+
+
+  const availableFolders = useMemo(() => {
+    if (!filters.category) return [];
+    const cat = categories.find((c: any) => c.name === filters.category);
+    if (!cat || !cat.folders) return [];
+    const flat = cat.folders;
+    const paths: string[] = [];
+    
+    const getPath = (folder: any) => {
+      let pathStr = folder.name;
+      let curr = folder;
+      while (curr.parent_folder_id) {
+        const parent = flat.find((f: any) => f.id === curr.parent_folder_id);
+        if (!parent) break;
+        pathStr = parent.name + '/' + pathStr;
+        curr = parent;
+      }
+      return pathStr;
+    };
+
+    flat.forEach((f: any) => paths.push(getPath(f)));
+    return paths.sort();
+  }, [categories, filters.category]);
+
+  // Fetch categories when masterfolder changes
+  useEffect(() => {
+    if (!filters.masterfolder_id || !isAuthorized) {
+      setCategories([]);
+      return;
+    }
+    fetch(apiUrl(`/api/admin/structure?masterfolderId=${filters.masterfolder_id}`), { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => res.json())
+      .then(data => {
+        if (data.categories && Array.isArray(data.categories)) {
+          setCategories(data.categories);
+        } else if (Array.isArray(data)) {
+          setCategories(data);
+        }
+      })
+      .catch(() => {});
+  }, [filters.masterfolder_id, isAuthorized, token]);
+  
+  // Job Tracking
+  const [activeJob, setActiveJob] = useState<any>(null);
 
   useEffect(() => {
     const t = localStorage.getItem('token');
@@ -82,7 +145,6 @@ export default function AdminBackupsPage() {
   const fetchBackups = useCallback(async () => {
     if (!token) return;
     setLoading(true);
-    setMessage(null);
     try {
       const res = await fetch(apiUrl('/api/admin/backups'), {
         headers: { Authorization: `Bearer ${token}` },
@@ -107,7 +169,6 @@ export default function AdminBackupsPage() {
       const data = await res.json();
       if (res.ok) setConfig(data);
     } catch {
-      // Non-blocking; backups list still works.
     }
   }, [token]);
 
@@ -120,43 +181,84 @@ export default function AdminBackupsPage() {
   const fetchPreview = useCallback(async () => {
     if (!token || !selectedId) return;
     setPreviewLoading(true);
-    setMessage(null);
     try {
-      const res = await fetch(apiUrl(`/api/admin/backups/${selectedId}/preview`), {
-        headers: { Authorization: `Bearer ${token}` },
+      const res = await fetch(apiUrl(`/api/admin/backups/preview`), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backupId: selectedId, filters: cleanFilters() })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to load backup preview');
-      setPreview(data);
+      setPreview(data.preview);
     } catch (error: any) {
       setMessage(error.message || 'Failed to load preview');
     } finally {
       setPreviewLoading(false);
     }
-  }, [token, selectedId]);
+  }, [token, selectedId, filters]);
 
   useEffect(() => {
     setPreview(null);
     if (selectedId) fetchPreview();
   }, [selectedId, fetchPreview]);
 
+  const cleanFilters = () => {
+    const f: any = {};
+    if (filters.masterfolder_id) f.masterfolder_id = filters.masterfolder_id;
+    if (filters.category) f.category = filters.category;
+    if (filters.folder) f.folder = filters.folder;
+    return f;
+  };
+
+  const pollJobStatus = (jobId: string, type: string) => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(apiUrl(`/api/admin/backups/status/${jobId}`), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await res.json();
+        if (data.success) {
+          setActiveJob(data.status);
+          if (data.status.status === 'completed' || data.status.status === 'failed') {
+            clearInterval(interval);
+            setBusy(false);
+            if (data.status.status === 'completed') {
+              setMessage(`${type} completed successfully!`);
+              if (type === 'Backup') {
+                fetchBackups();
+                setSelectedId(data.status.result?.backup_id);
+              } else {
+                fetchPreview();
+                fetchBackups();
+              }
+            } else {
+              setMessage(`${type} failed: ${data.status.error}`);
+            }
+            setTimeout(() => setActiveJob(null), 5000);
+          }
+        }
+      } catch (err) {
+        // ignore network errors while polling
+      }
+    }, 1000);
+  };
+
   const createManualBackup = async () => {
     if (!token) return;
     setBusy(true);
-    setMessage(null);
+    setMessage('Starting backup job...');
+    setActiveJob(null);
     try {
       const res = await fetch(apiUrl('/api/admin/backups'), {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filters: cleanFilters() })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to create backup');
-      await fetchBackups();
-      setSelectedId(data.backup?.backup_id || null);
-      setMessage(`Backup created: ${data.backup?.backup_id}`);
+      pollJobStatus(data.job_id, 'Backup');
     } catch (error: any) {
       setMessage(error.message || 'Failed to create backup');
-    } finally {
       setBusy(false);
     }
   };
@@ -165,28 +267,42 @@ export default function AdminBackupsPage() {
     if (!token || !selectedId) return;
     const ok = await confirm({
       title: 'Restore backup',
-      message: `Restore backup ${selectedId}? This will overwrite current records to match that snapshot.`,
+      message: `Restore backup ${selectedId}? This will overwrite current records matching the selected filters.`,
       confirmText: 'Restore',
       destructive: true,
     });
     if (!ok) return;
 
     setBusy(true);
-    setMessage(null);
+    setMessage('Starting restore job...');
+    setActiveJob(null);
     try {
-      const res = await fetch(apiUrl(`/api/admin/backups/${selectedId}/restore`), {
+      const res = await fetch(apiUrl(`/api/admin/backups/restore`), {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ backupId: selectedId, filters: cleanFilters() })
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to restore backup');
-      setMessage(`Backup restored: ${selectedId}`);
-      await fetchPreview();
-      await fetchBackups();
+      pollJobStatus(data.job_id, 'Restore');
     } catch (error: any) {
       setMessage(error.message || 'Failed to restore backup');
-    } finally {
       setBusy(false);
+    }
+  };
+
+  const saveSchedule = async (enabled: boolean, interval: string) => {
+    if (!token) return;
+    try {
+      await fetch(apiUrl('/api/admin/backup-schedule'), {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled, interval })
+      });
+      setMessage('Schedule updated successfully.');
+      fetchConfig();
+    } catch (err) {
+      setMessage('Failed to update schedule.');
     }
   };
 
@@ -209,7 +325,7 @@ export default function AdminBackupsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-[30px] font-bold tracking-tight text-[var(--text-primary)]">Backups & Restore</h1>
-          <p className="text-[13px] text-[var(--text-secondary)] mt-1">Manage 2:00 AM snapshots and roll back by date with a change preview.</p>
+          <p className="text-[13px] text-[var(--text-secondary)] mt-1">Manage granular snapshots, restore specific categories, and track progress.</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -218,41 +334,103 @@ export default function AdminBackupsPage() {
           >
             <RefreshCw size={14} /> Refresh
           </button>
-          <button
-            disabled={busy}
-            onClick={createManualBackup}
-            className="px-3 py-2 rounded-[10px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[13px] font-bold flex items-center gap-2 disabled:opacity-60"
-          >
-            <Database size={14} /> Backup Now
-          </button>
         </div>
       </div>
+      
+      {/* Active Job Progress Tracker */}
+      {activeJob && (
+        <div className="px-5 py-4 rounded-[12px] border border-[var(--accent)] bg-[var(--accent)]/10 text-sm">
+          <div className="flex justify-between font-bold text-[var(--accent)] mb-2">
+            <span>{activeJob.type === 'backup' ? 'Backup' : 'Restore'} Progress ({activeJob.status})</span>
+            {activeJob.eta_seconds !== null && <span>ETA: {activeJob.eta_seconds}s</span>}
+          </div>
+          <div className="w-full bg-[var(--bg-neutral)] rounded-full h-2.5">
+            <div className="bg-[var(--accent)] h-2.5 rounded-full" style={{ width: `${Math.max(5, (activeJob.progress / (activeJob.total || 1)) * 100)}%` }}></div>
+          </div>
+          <div className="flex justify-between mt-2 text-xs text-[var(--text-secondary)]">
+            <span>{activeJob.message}</span>
+            <span>{activeJob.progress} / {activeJob.total}</span>
+          </div>
+        </div>
+      )}
 
-      {message && <div className="px-4 py-3 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[13px]">{message}</div>}
+      {message && !activeJob && <div className="px-4 py-3 rounded-[12px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[13px]">{message}</div>}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[20px] overflow-hidden lg:col-span-1">
-          <div className="px-5 py-4 border-b border-[var(--border-subtle)] font-semibold text-[14px]">Available Backups</div>
-          <div className="max-h-[520px] overflow-y-auto">
-            {loading ? (
-              <div className="p-5 text-[13px] text-[var(--text-tertiary)]">Loading...</div>
-            ) : list.length === 0 ? (
-              <div className="p-5 text-[13px] text-[var(--text-tertiary)]">No backups found yet.</div>
-            ) : (
-              list.map((item) => (
-                <button
-                  key={item.backup_id}
-                  onClick={() => setSelectedId(item.backup_id)}
-                  className={`w-full text-left px-5 py-4 border-b border-[var(--border-subtle)] hover:bg-[var(--bg-neutral)] transition-colors ${
-                    selectedId === item.backup_id ? 'bg-[var(--accent-soft)]/40' : ''
-                  }`}
-                >
-                  <div className="text-[13px] font-semibold text-[var(--text-primary)]">{new Date(item.created_at).toLocaleString()}</div>
-                  <div className="text-[12px] text-[var(--text-tertiary)] mt-1">{item.backup_id}</div>
-                  <div className="text-[12px] text-[var(--text-secondary)] mt-1">{fmtBytes(item.size_bytes)}</div>
-                </button>
-              ))
-            )}
+        <div className="space-y-6 lg:col-span-1">
+          <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[20px] p-5 space-y-4">
+            <h2 className="text-[16px] font-bold text-[var(--text-primary)]">Granular Filter</h2>
+            <p className="text-[12px] text-[var(--text-secondary)]">Narrow down what to backup or restore.</p>
+            
+            <select
+              value={filters.masterfolder_id}
+              onChange={e => {
+                setFilters(f => ({ ...f, masterfolder_id: e.target.value, category: '', folder: '' }));
+              }}
+              className="w-full p-2.5 rounded-[10px] bg-[var(--bg-surface)] text-[14px] font-medium border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none transition-colors"
+            >
+              <option value="">All / Everything</option>
+              {masterfolders.map((m: any) => (
+                <option key={m.id} value={m.id}>{m.name || m.title || `Masterfolder ${m.id}`}</option>
+              ))}
+            </select>
+
+            <select
+              disabled={!filters.masterfolder_id}
+              value={filters.category}
+              onChange={e => setFilters(f => ({ ...f, category: e.target.value, folder: '' }))}
+              className="w-full p-2.5 rounded-[10px] bg-[var(--bg-surface)] text-[14px] font-medium border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none disabled:opacity-50 transition-colors"
+            >
+              <option value="">All Categories</option>
+              {categories.map((c: any) => (
+                <option key={c.id || c.name} value={c.name}>{c.name}</option>
+              ))}
+            </select>
+
+            <select
+              disabled={!filters.category}
+              value={filters.folder}
+              onChange={e => setFilters(f => ({ ...f, folder: e.target.value }))}
+              className="w-full p-2.5 rounded-[10px] bg-[var(--bg-surface)] text-[14px] font-medium border border-[var(--border-subtle)] focus:border-[var(--accent)] outline-none disabled:opacity-50 transition-colors"
+            >
+              <option value="">All Folders</option>
+              {availableFolders.map((path: string) => (
+                <option key={path} value={path}>{path}</option>
+              ))}
+            </select>
+
+            <button
+              disabled={busy}
+              onClick={createManualBackup}
+              className="w-full py-2.5 mt-2 rounded-[10px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[13px] font-bold flex justify-center items-center gap-2 disabled:opacity-60"
+            >
+              <Database size={15} /> Create Backup
+            </button>
+          </div>
+        
+          <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[20px] overflow-hidden">
+            <div className="px-5 py-4 border-b border-[var(--border-subtle)] font-semibold text-[14px]">Available Backups</div>
+            <div className="max-h-[300px] overflow-y-auto">
+              {loading ? (
+                <div className="p-5 text-[13px] text-[var(--text-tertiary)]">Loading...</div>
+              ) : list.length === 0 ? (
+                <div className="p-5 text-[13px] text-[var(--text-tertiary)]">No backups found yet.</div>
+              ) : (
+                list.map((item) => (
+                  <button
+                    key={item.backup_id}
+                    onClick={() => setSelectedId(item.backup_id)}
+                    className={`w-full text-left px-5 py-4 border-b border-[var(--border-subtle)] hover:bg-[var(--bg-neutral)] transition-colors ${
+                      selectedId === item.backup_id ? 'bg-[var(--accent-soft)]/40' : ''
+                    }`}
+                  >
+                    <div className="text-[13px] font-semibold text-[var(--text-primary)]">{new Date(item.created_at).toLocaleString()}</div>
+                    <div className="text-[12px] text-[var(--text-tertiary)] mt-1">{item.backup_id}</div>
+                    <div className="text-[12px] text-[var(--text-secondary)] mt-1">{fmtBytes(item.size_bytes)}</div>
+                  </button>
+                ))
+              )}
+            </div>
           </div>
         </div>
 
@@ -264,7 +442,7 @@ export default function AdminBackupsPage() {
               onClick={restoreSelected}
               className="px-3 py-2 rounded-[10px] bg-[#ff5b52] text-white text-[13px] font-bold disabled:opacity-60 flex items-center gap-2"
             >
-              <RotateCcw size={14} /> Restore Selected Backup
+              <RotateCcw size={14} /> Restore Selected Scope
             </button>
           </div>
 
@@ -279,11 +457,11 @@ export default function AdminBackupsPage() {
                   <div className="text-[13px] font-semibold mt-1">{new Date(preview.created_at).toLocaleString()}</div>
                 </div>
                 <div className="rounded-[12px] border border-[var(--border-subtle)] p-4 bg-[var(--bg-neutral)]/40">
-                  <div className="text-[11px] uppercase tracking-wider text-[var(--text-tertiary)]">Files In Backup</div>
+                  <div className="text-[11px] uppercase tracking-wider text-[var(--text-tertiary)]">Files In Scope</div>
                   <div className="text-[20px] font-bold mt-1">{preview.changes.files_in_backup}</div>
                 </div>
                 <div className="rounded-[12px] border border-[var(--border-subtle)] p-4 bg-[var(--bg-neutral)]/40">
-                  <div className="text-[11px] uppercase tracking-wider text-[var(--text-tertiary)]">Current Files</div>
+                  <div className="text-[11px] uppercase tracking-wider text-[var(--text-tertiary)]">Current Scope Files</div>
                   <div className="text-[20px] font-bold mt-1">{preview.changes.files_current}</div>
                 </div>
               </div>
@@ -300,9 +478,9 @@ export default function AdminBackupsPage() {
               <div className="rounded-[12px] border border-[#ff9500]/30 bg-[#ff9500]/10 p-4 text-[13px] text-[var(--text-primary)] flex items-start gap-3">
                 <ShieldAlert size={18} className="mt-0.5 text-[#ff9500]" />
                 <div>
-                  <div className="font-semibold">Restore scope</div>
+                  <div className="font-semibold">Restore Scope (Filtered)</div>
                   <div className="text-[12px] mt-1 text-[var(--text-secondary)]">
-                    This restore syncs database records, MinIO objects, and local media files from the selected backup folder.
+                    This restore will only overwrite records that match your selected Masterfolder, Category, or Folder filters on the left.
                   </div>
                 </div>
               </div>
@@ -311,15 +489,24 @@ export default function AdminBackupsPage() {
         </div>
       </div>
 
-      <div className="rounded-[14px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-4 text-[12px] text-[var(--text-secondary)] flex items-start gap-2">
-        <Sparkles size={15} className="mt-0.5 text-[var(--accent)]" />
-        <div>
-          <div>Scheduled backups run at 2:00 AM server time (configurable with `BACKUP_CRON`).</div>
-          {config && (
-            <div className="mt-1 text-[11px] text-[var(--text-tertiary)]">
-              Path: {config.backup_storage_path} | Cron: {config.backup_cron} | Retention: {config.backup_retention_days} days
-            </div>
-          )}
+      <div className="rounded-[14px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 space-y-4">
+        <div className="flex items-center gap-2 font-bold text-[15px]"><Settings size={16} /> Auto-Backup Schedule</div>
+        <p className="text-xs text-[var(--text-secondary)]">Configure automatic backups (currently configured in <code>backup_config.json</code>). Retention policies are disabled indefinitely as requested.</p>
+        
+        <div className="flex items-center gap-4 mt-3">
+          <select 
+            className="p-2 bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-lg text-sm outline-none"
+            onChange={(e) => saveSchedule(true, e.target.value)}
+            defaultValue="Daily"
+          >
+            <option value="Daily">Daily (2:00 AM)</option>
+            <option value="Weekly">Weekly (Sun 2:00 AM)</option>
+            <option value="Monthly">Monthly (1st 2:00 AM)</option>
+            <option value="Quarterly">Quarterly</option>
+          </select>
+          <button onClick={() => saveSchedule(false, 'Disabled')} className="px-3 py-2 rounded-lg border border-[#ff5b52] text-[#ff5b52] text-sm font-semibold hover:bg-[#ff5b52]/10 transition-colors">
+            Disable Auto-Backup
+          </button>
         </div>
       </div>
     </div>

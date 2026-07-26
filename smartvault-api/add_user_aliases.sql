@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS user_file_aliases (
 
 CREATE TABLE IF NOT EXISTS user_folder_aliases (
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    folder_id INTEGER REFERENCES company_department_folders(id) ON DELETE CASCADE,
+    folder_id INTEGER REFERENCES company_category_folders(id) ON DELETE CASCADE,
     alias_name VARCHAR(500) NOT NULL,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),

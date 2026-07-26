@@ -187,7 +187,7 @@ export default function FileGrid({
                     <Calendar size={11} /> {new Date(file.expiry_date).toLocaleDateString()}
                   </span>
                 )}
-                <span className="text-[13px] text-[rgba(0,0,0,0.48)]">{file.department} · {formatBytes(Number(file.size_bytes))}</span>
+                <span className="text-[13px] text-[rgba(0,0,0,0.48)]">{file.category} · {formatBytes(Number(file.size_bytes))}</span>
                 <span className="text-[12px] text-[rgba(0,0,0,0.32)]">{file.upload_date ? new Date(file.upload_date).toLocaleDateString() : ''}</span>
               </div>
             </div>

@@ -12,10 +12,10 @@ async function migrate() {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS file_sequences (
-        department VARCHAR(50),
+        category VARCHAR(50),
         year_month VARCHAR(7),
         last_sequence INTEGER DEFAULT 0,
-        PRIMARY KEY (department, year_month)
+        PRIMARY KEY (category, year_month)
       );
     `);
     await pool.query("ALTER TABLE vault_files ADD COLUMN IF NOT EXISTS auto_name VARCHAR(255);");

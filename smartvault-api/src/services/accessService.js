@@ -7,10 +7,10 @@ function checkFilePermission(user, fileRecord, action) {
   // 'DELETE' and 'DELETE_COPIES' strictly blocked (unless Admin, which is handled above)
   if (action === 'DELETE' || action === 'DELETE_COPIES') return false; 
 
-  const isOwnDeptOrAllowed = (fileRecord.department === user.department) || (user.allowed_departments && user.allowed_departments.includes(fileRecord.department));
+  const isOwnDeptOrAllowed = (fileRecord.category === user.category) || (user.allowed_categories && user.allowed_categories.includes(fileRecord.category));
   
   if (user.role === 'Manager') {
-    // Edit (Rename/Tag/Expiry/Copy) & Move: Yes - own dept (or allowed)
+    // Edit (Rename/Tag/Expiry/Copy) & Move: Yes - own category (or allowed)
     if (['RENAME', 'TAG', 'EXPIRY', 'MOVE', 'COPY'].includes(action)) {
       return isOwnDeptOrAllowed;
     }
@@ -30,23 +30,24 @@ function checkFilePermission(user, fileRecord, action) {
   return false;
 }
 
-function canAccessDepartment(user, department) {
-  if (!user || !department) return false;
+function canAccessCategory(user, category) {
+  if (!user || !category) return false;
   if (user.role === 'Admin') return true;
-  if (user.department === department) return true;
-  return Array.isArray(user.allowed_departments) && user.allowed_departments.includes(department);
+  if (user.category === category) return true;
+  return Array.isArray(user.allowed_categories) && user.allowed_categories.includes(category);
 }
 
 async function getEffectiveUserSettings(userId, db = pool) {
   const userResult = await db.query(
-    `SELECT u.id, u.username, u.role, u.department, u.allowed_departments,
+    `SELECT u.id, u.username, u.role, u.category, u.allowed_categories,
             COALESCE(up.theme_preference, u.theme_preference, 'light') AS theme_preference,
             COALESCE(up.can_upload_to_allowed, u.can_upload_to_allowed, false) AS can_upload_to_allowed,
             COALESCE(ub.can_bulk_move, u.can_bulk_move, true) AS can_bulk_move,
             COALESCE(ub.can_bulk_copy, u.can_bulk_copy, true) AS can_bulk_copy,
             COALESCE(ub.can_bulk_delete, u.can_bulk_delete, false) AS can_bulk_delete,
             COALESCE(ub.can_bulk_rename, u.can_bulk_rename, true) AS can_bulk_rename,
-            COALESCE(ub.can_bulk_download, u.can_bulk_download, true) AS can_bulk_download
+            COALESCE(ub.can_bulk_download, u.can_bulk_download, true) AS can_bulk_download,
+            u.can_download_folders AS can_download_folders
      FROM users u
      LEFT JOIN user_preferences up ON up.user_id = u.id
      LEFT JOIN user_bulk_permissions ub ON ub.user_id = u.id
@@ -59,39 +60,39 @@ async function getEffectiveUserSettings(userId, db = pool) {
   const effectiveUser = userResult.rows[0];
 
   const deptPermissionResult = await db.query(
-    `SELECT department, can_upload
-     FROM user_department_permissions
+    `SELECT category, can_upload
+     FROM user_category_permissions
      WHERE user_id = $1
-     ORDER BY department ASC`,
+     ORDER BY category ASC`,
     [userId]
   );
 
   const deptUploadPermissions = {};
   for (const row of deptPermissionResult.rows) {
-    deptUploadPermissions[row.department] = Boolean(row.can_upload);
+    deptUploadPermissions[row.category] = Boolean(row.can_upload);
   }
 
-  const companyAccessResult = await db.query(
-    `SELECT company_id, department, can_upload, is_primary
-     FROM user_company_access
+  const masterfolderAccessResult = await db.query(
+    `SELECT masterfolder_id, category, can_upload, is_primary
+     FROM user_masterfolder_access
      WHERE user_id = $1
-     ORDER BY is_primary DESC, company_id ASC, department ASC`,
+     ORDER BY is_primary DESC, masterfolder_id ASC, category ASC`,
     [userId]
   ).catch(() => ({ rows: [] }));
 
   const folderAccessResult = await db.query(
-    `SELECT company_id, department, folder_path, is_exclusion
+    `SELECT masterfolder_id, category, folder_path, is_exclusion
      FROM user_folder_access
      WHERE user_id = $1
-     ORDER BY company_id ASC, department ASC, folder_path ASC`,
+     ORDER BY masterfolder_id ASC, category ASC, folder_path ASC`,
     [userId]
   ).catch(() => ({ rows: [] }));
 
   return {
     ...effectiveUser,
-    allowed_departments: effectiveUser.allowed_departments || [],
+    allowed_categories: effectiveUser.allowed_categories || [],
     dept_upload_permissions: deptUploadPermissions,
-    company_access: companyAccessResult.rows || [],
+    masterfolder_access: masterfolderAccessResult.rows || [],
     folder_access: folderAccessResult.rows || [],
   };
 }
@@ -105,7 +106,7 @@ async function hydrateRequestUser(req, db = pool) {
 
 module.exports = {
   checkFilePermission,
-  canAccessDepartment,
+  canAccessCategory,
   getEffectiveUserSettings,
   hydrateRequestUser,
 };

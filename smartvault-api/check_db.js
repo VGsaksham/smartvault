@@ -23,7 +23,7 @@ async function checkDbSnapshot() {
   console.log('FYS:', JSON.stringify(fys.rows));
   const files = await pool.query('SELECT COUNT(*) as total, m.company_id, m.fy_id FROM vault_file_metadata m GROUP BY m.company_id, m.fy_id');
   console.log('FILES_BY_CO_FY:', JSON.stringify(files.rows));
-  const sample = await pool.query('SELECT f.id, f.original_name, f.department, m.company_id, m.fy_id FROM vault_files f JOIN vault_file_metadata m ON m.file_id = f.id LIMIT 10');
+  const sample = await pool.query('SELECT f.id, f.original_name, f.category, m.company_id, m.fy_id FROM vault_files f JOIN vault_file_metadata m ON m.file_id = f.id LIMIT 10');
   console.log('SAMPLE_FILES:', JSON.stringify(sample.rows));
 }
 

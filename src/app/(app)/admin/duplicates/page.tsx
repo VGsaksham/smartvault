@@ -137,7 +137,7 @@ export default function DuplicateReport() {
                       </p>
                       <div className="flex items-center gap-3 text-[13px] text-[var(--text-secondary)]">
                         <span className="bg-[var(--bg-elevated)] px-2 py-0.5 rounded border border-[var(--border-subtle)]">
-                          {file.department} {file.folder ? `/ ${file.folder}` : ''}
+                          {file.category} {file.folder ? `/ ${file.folder}` : ''}
                         </span>
                         <span>•</span>
                         <span>Uploaded by <span className="font-medium text-[var(--text-primary)]">{file.uploader_name}</span></span>

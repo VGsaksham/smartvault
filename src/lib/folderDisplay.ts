@@ -3,13 +3,13 @@ export function normalizeFolderPath(value: string | null | undefined): string {
   return String(value).trim().replace(/^\/+|\/+$/g, '');
 }
 
-export function folderAliasKey(department: string, folderPath: string | null | undefined): string {
-  return `${department}::${normalizeFolderPath(folderPath)}`;
+export function folderAliasKey(category: string, folderPath: string | null | undefined): string {
+  return `${category}::${normalizeFolderPath(folderPath)}`;
 }
 
 export function displayFolderLabel(
   folderPath: string | null | undefined,
-  department: string,
+  category: string,
   aliases: Record<string, string>
 ): string {
   const canonical = normalizeFolderPath(folderPath);
@@ -18,7 +18,7 @@ export function displayFolderLabel(
   return parts
     .map((_, idx) => {
       const partial = parts.slice(0, idx + 1).join('/');
-      const key = folderAliasKey(department, partial);
+      const key = folderAliasKey(category, partial);
       return aliases[key] || parts[idx];
     })
     .join(' / ');
@@ -26,10 +26,10 @@ export function displayFolderLabel(
 
 export function displayFolderSegment(
   folderPath: string,
-  department: string,
+  category: string,
   aliases: Record<string, string>
 ): string {
-  const key = folderAliasKey(department, folderPath);
+  const key = folderAliasKey(category, folderPath);
   if (aliases[key]) return aliases[key];
   const parts = folderPath.split('/');
   return parts[parts.length - 1] || folderPath;

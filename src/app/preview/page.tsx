@@ -17,19 +17,19 @@ function FolderPreviewPageInner() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const dept = searchParams.get('dept');
+  const category = searchParams.get('category');
   const folder = searchParams.get('folder');
 
   useEffect(() => {
     const fetchFolder = async () => {
       try {
-        if (!dept) {
+        if (!category) {
           setError("Invalid folder link.");
           setLoading(false);
           return;
         }
 
-        const res = await fetch(apiUrl(`/api/public/folder?dept=${encodeURIComponent(dept)}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}`));;
+        const res = await fetch(apiUrl(`/api/public/folder?category=${encodeURIComponent(category)}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}`));;
 
         if (!res.ok) {
           setError("Folder not found or has been removed.");
@@ -46,7 +46,7 @@ function FolderPreviewPageInner() {
     };
 
     fetchFolder();
-  }, [dept, folder]);
+  }, [category, folder]);
 
   const handlePreviewFile = (fileId: number) => {
     window.open(apiUrl(`/api/public/preview/${fileId}`), '_blank');
@@ -90,7 +90,7 @@ function FolderPreviewPageInner() {
               {data.folder === 'null' || !data.folder ? 'Root' : data.folder.split('/').pop()}
             </h1>
             <p className="text-[var(--text-secondary)] text-[15px] font-medium">
-              {data.department}
+              {data.category}
             </p>
           </div>
         </div>

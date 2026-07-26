@@ -24,20 +24,20 @@ export default function AuthHeartbeat() {
             if (oldUserStr && oldUserStr !== newUserStr) {
               // Only reload if the user changed and it's not the first render
               // wait, the first render would also have an oldUserStr.
-              // Let's just compare the critical fields: role, company_access, allowed_departments
+              // Let's just compare the critical fields: role, masterfolder_access, allowed_categories
               const oldUser = JSON.parse(oldUserStr);
               const roleChanged = oldUser.role !== data.user.role;
               
-              const oldAllowed = JSON.stringify(oldUser.allowed_departments || []);
-              const newAllowed = JSON.stringify(data.user.allowed_departments || []);
+              const oldAllowed = JSON.stringify(oldUser.allowed_categories || []);
+              const newAllowed = JSON.stringify(data.user.allowed_categories || []);
               
-              const oldCompanyAccess = JSON.stringify(oldUser.company_access || []);
-              const newCompanyAccess = JSON.stringify(data.user.company_access || []);
+              const oldmasterfolderAccess = JSON.stringify(oldUser.masterfolder_access || []);
+              const newmasterfolderAccess = JSON.stringify(data.user.masterfolder_access || []);
 
               const oldFolderAccess = JSON.stringify(oldUser.folder_access || []);
               const newFolderAccess = JSON.stringify(data.user.folder_access || []);
               
-              if (roleChanged || oldAllowed !== newAllowed || oldCompanyAccess !== newCompanyAccess || oldFolderAccess !== newFolderAccess) {
+              if (roleChanged || oldAllowed !== newAllowed || oldmasterfolderAccess !== newmasterfolderAccess || oldFolderAccess !== newFolderAccess) {
                 localStorage.setItem('user', newUserStr);
                 window.location.reload();
               } else if (oldUserStr !== newUserStr) {

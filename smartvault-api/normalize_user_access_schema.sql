@@ -17,17 +17,17 @@ CREATE TABLE IF NOT EXISTS user_bulk_permissions (
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS user_department_permissions (
+CREATE TABLE IF NOT EXISTS user_category_permissions (
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  department TEXT NOT NULL,
+  category TEXT NOT NULL,
   can_upload BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (user_id, department)
+  PRIMARY KEY (user_id, category)
 );
 
-CREATE INDEX IF NOT EXISTS idx_udp_user_id ON user_department_permissions(user_id);
-CREATE INDEX IF NOT EXISTS idx_udp_department ON user_department_permissions(department);
+CREATE INDEX IF NOT EXISTS idx_udp_user_id ON user_category_permissions(user_id);
+CREATE INDEX IF NOT EXISTS idx_udp_category ON user_category_permissions(category);
 
 INSERT INTO user_preferences (user_id, theme_preference, can_upload_to_allowed)
 SELECT id, COALESCE(theme_preference, 'light'), COALESCE(can_upload_to_allowed, false)
@@ -61,18 +61,18 @@ ON CONFLICT (user_id) DO UPDATE SET
   can_bulk_download = EXCLUDED.can_bulk_download,
   updated_at = NOW();
 
-INSERT INTO user_department_permissions (user_id, department, can_upload)
-SELECT id, department, true
+INSERT INTO user_category_permissions (user_id, category, can_upload)
+SELECT id, category, true
 FROM users
-WHERE department IS NOT NULL
-ON CONFLICT (user_id, department) DO UPDATE SET
+WHERE category IS NOT NULL
+ON CONFLICT (user_id, category) DO UPDATE SET
   can_upload = EXCLUDED.can_upload,
   updated_at = NOW();
 
-INSERT INTO user_department_permissions (user_id, department, can_upload)
-SELECT u.id, d.department, COALESCE(u.can_upload_to_allowed, false)
+INSERT INTO user_category_permissions (user_id, category, can_upload)
+SELECT u.id, d.category, COALESCE(u.can_upload_to_allowed, false)
 FROM users u
-CROSS JOIN LATERAL UNNEST(COALESCE(u.allowed_departments, '{}'::TEXT[])) AS d(department)
-ON CONFLICT (user_id, department) DO UPDATE SET
+CROSS JOIN LATERAL UNNEST(COALESCE(u.allowed_categories, '{}'::TEXT[])) AS d(category)
+ON CONFLICT (user_id, category) DO UPDATE SET
   can_upload = EXCLUDED.can_upload,
   updated_at = NOW();

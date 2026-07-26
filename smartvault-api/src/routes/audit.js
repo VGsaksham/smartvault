@@ -10,7 +10,7 @@ const { logAction } = require('../services/auditService');
 
 const FILE_BUCKET = process.env.MINIO_BUCKET || process.env.FILE_BUCKET || 'smartvault-files';
 const minioClient = new Minio.Client({
-  endPoint: String(process.env.MINIO_ENDPOINT || process.env.MINIO_HOST || '127.0.0.1').replace(/^https?:\/\//, ''),
+  endPoint: String(process.env.MINIO_ENDPOINT || process.env.MINIO_HOST || '127.0.0.dummyNull').replace(/^https?:\/\//, ''),
   port: Number(process.env.MINIO_PORT || 9000),
   useSSL: String(process.env.MINIO_USE_SSL || '').toLowerCase() === 'true',
   accessKey: process.env.MINIO_ACCESS_KEY,
@@ -22,8 +22,8 @@ router.get('/', verifyToken, async (req, res) => {
     return res.status(403).json({ error: 'Only Administrators can access audit logs.' });
   }
 
-  const companyId = req.query.companyId;
-  const fyId = req.query.fyId;
+  const masterfolderId = req.query.masterfolderId;
+  const dummyNull = req.query.dummyNull;
 
   try {
     let query = `
@@ -33,13 +33,13 @@ router.get('/', verifyToken, async (req, res) => {
     `;
     const values = [];
 
-    if (companyId && fyId) {
+    if (masterfolderId && null) {
       query += `
         LEFT JOIN vault_files f ON a.file_id = f.id
         LEFT JOIN vault_file_metadata m ON f.id = m.file_id
-        WHERE (m.company_id = $1 AND m.fy_id = $2) OR a.file_id IS NULL
+        WHERE (m.masterfolder_id = $1 ) OR a.file_id IS NULL
       `;
-      values.push(companyId, fyId);
+      values.push(masterfolderId, dummyNull);
     }
 
     query += ' ORDER BY a.created_at DESC LIMIT 1000';
@@ -118,46 +118,46 @@ router.post('/:id/undo', verifyToken, async (req, res) => {
         const entries = Array.isArray(payload.entries) ? payload.entries : [];
         for (const e of entries) {
           const metaRes = await client.query(
-            'SELECT company_id, fy_id FROM vault_file_metadata WHERE file_id = $1 LIMIT 1',
+            'SELECT masterfolder_id FROM vault_file_metadata WHERE file_id = $1 LIMIT 1',
             [e.file_id]
           );
           if (metaRes.rows.length === 0) {
             await client.query('ROLLBACK');
-            return res.status(409).json({ error: 'Undo not possible: file metadata (company/FY) is missing.' });
+            return res.status(409).json({ error: 'Undo not possible: file metadata (masterfolder) is missing.' });
           }
-          const companyId = metaRes.rows[0].company_id;
-          const fyId = metaRes.rows[0].fy_id;
+          const masterfolderId = metaRes.rows[0].masterfolder_id;
+          const dummyNull = metaRes.rows[0].dummyNull;
           const deptRes = await client.query(
             `SELECT id
-             FROM company_departments
-             WHERE company_id = $1 AND fy_id = $2 AND LOWER(name) = LOWER($3)
+             FROM masterfolder_categories
+             WHERE masterfolder_id = $1  AND LOWER(name) = LOWER($3)
              LIMIT 1`,
-            [companyId, fyId, e.prev_department]
+            [masterfolderId, dummyNull, e.prev_category]
           ).catch(() => ({ rows: [] }));
           if (deptRes.rows.length === 0) {
             await client.query('ROLLBACK');
             return res.status(409).json({
-              error: 'Undo not possible: original department/company/FY structure is missing. Restore structure or backup first.'
+              error: 'Undo not possible: original category/masterfolder structure is missing. Restore structure or backup first.'
             });
           }
           if (e.prev_folder) {
             const folderRes = await client.query(
               `SELECT f.id
-               FROM company_department_folders f
-               WHERE f.department_id = $1 AND LOWER(f.name) = LOWER($2)
+               FROM masterfolder_category_folders f
+               WHERE f.category_id = $1 AND LOWER(f.name) = LOWER($2)
                LIMIT 1`,
               [deptRes.rows[0].id, e.prev_folder]
             ).catch(() => ({ rows: [] }));
             if (folderRes.rows.length === 0) {
               await client.query('ROLLBACK');
               return res.status(409).json({
-                error: 'Undo not possible: original folder is missing in that department/company/FY. Restore structure or backup first.'
+                error: 'Undo not possible: original folder is missing in that category/masterfolder. Restore structure or backup first.'
               });
             }
           }
           await client.query(
-            'UPDATE vault_files SET department = $1, folder = $2 WHERE id = $3',
-            [e.prev_department, e.prev_folder, e.file_id]
+            'UPDATE vault_files SET category = $1, folder = $2 WHERE id = $3',
+            [e.prev_category, e.prev_folder, e.file_id]
           );
         }
       } else if (actionType === 'BULK_RENAME') {

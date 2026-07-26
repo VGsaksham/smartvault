@@ -8,31 +8,32 @@ import { CustomSelect } from '@/components/ui/Select';
 
 type User = {
   id: number; username: string; email: string;
-  role: 'Admin'|'Manager'|'Staff'|'Guest'; department: string;
-  allowed_departments: string[]|null;
-  company_access?: CompanyAccess[];
-  folder_access?: { company_id: number; department: string; folder_path: string; is_exclusion: boolean }[];
+  role: 'Admin'|'Manager'|'Staff'|'Guest'; category: string;
+  allowed_categories: string[]|null;
+  masterfolder_access?: masterfolderAccess[];
+  folder_access?: { masterfolder_id: number; category: string; folder_path: string; is_exclusion: boolean }[];
   dept_upload_permissions?: Record<string, boolean>|null;
   can_bulk_move: boolean; can_bulk_copy: boolean; can_bulk_delete: boolean;
-  can_bulk_rename: boolean; can_bulk_download: boolean;
+  can_bulk_rename: boolean; can_bulk_download: boolean; can_download_folders?: boolean;
   can_upload_to_allowed: boolean;
+  can_manage_structure?: boolean;
   created_at: string;
   status: 'Active' | 'Suspended';
   last_ip_address?: string;
 };
 
-type Company = { id: number; name: string };
-type CompanyAccess = {
-  company_id: number;
-  company_name?: string;
-  department: string;
+type masterfolder = { id: number; name: string };
+type masterfolderAccess = {
+  masterfolder_id: number;
+  masterfolder_name?: string;
+  category: string;
   can_upload: boolean;
   is_primary?: boolean;
 };
 
 // Admin role is reserved (not assignable via UI)
 const ROLES = ['Manager','Staff','Guest'] as const;
-// Departments should be dynamic (per selected Company + FY).
+// Categories should be dynamic (per selected masterfolder + FY).
 // Keep this empty to avoid hardcoding.
 const DEFAULT_DEPTS: string[] = [];
 
@@ -43,7 +44,7 @@ const roleMeta: Record<string, { bg: string; text: string; dot: string }> = {
   Guest:   { bg: 'rgba(245, 158, 11, 0.1)', text: '#f59e0b', dot: '#f59e0b' },
 };
 
-const emptyForm = { username:'', email:'', password:'', role:'Staff', department:'', primary_company_id:'' };
+const emptyForm = { username:'', email:'', password:'', role:'Staff', category:'', primary_masterfolder_id:'' };
 
 import { Suspense } from 'react';
 
@@ -58,35 +59,35 @@ function UsersPageContent() {
   const [isNewUserOpen, setIsNewUserOpen] = useState(false);
   const [form, setForm] = useState({...emptyForm});
   const [submitting, setSubmitting] = useState(false);
-  const [companies, setCompanies] = useState<Company[]>([]);
-  const [departments, setDepartments] = useState<string[]>(DEFAULT_DEPTS);
-  const [createCompanyAccess, setCreateCompanyAccess] = useState<CompanyAccess[]>([]);
-  const [createCompanyPrompt, setCreateCompanyPrompt] = useState<{
-    company_id: number;
-    company_name: string;
-    department: string;
+  const [masterfolders, setmasterfolders] = useState<masterfolder[]>([]);
+  const [categories, setCategories] = useState<string[]>(DEFAULT_DEPTS);
+  const [createmasterfolderAccess, setCreatemasterfolderAccess] = useState<masterfolderAccess[]>([]);
+  const [createmasterfolderPrompt, setCreatemasterfolderPrompt] = useState<{
+    masterfolder_id: number;
+    masterfolder_name: string;
+    category: string;
   }|null>(null);
   const [selectedUser, setSelectedUser] = useState<User|null>(null);
   const [detailRole, setDetailRole] = useState<User['role']>('Staff');
   const [detailStatus, setDetailStatus] = useState<User['status']>('Active');
   const [detailPermData, setDetailPermData] = useState<any>(null);
   const [accessPrompt, setAccessPrompt] = useState<{
-    type: 'department' | 'company';
+    type: 'category' | 'masterfolder';
     label: string;
-    department?: string;
-    companyId?: number;
+    category?: string;
+    masterfolderId?: number;
   } | null>(null);
-  const [companyDeptPrompt, setCompanyDeptPrompt] = useState<{
-    companyId: number;
-    companyName: string;
+  const [masterfolderDeptPrompt, setmasterfolderDeptPrompt] = useState<{
+    masterfolderId: number;
+    masterfolderName: string;
   } | null>(null);
-  const [companyFolderPrompt, setCompanyFolderPrompt] = useState<{
-    companyId: number;
-    companyName: string;
+  const [masterfolderFolderPrompt, setmasterfolderFolderPrompt] = useState<{
+    masterfolderId: number;
+    masterfolderName: string;
   } | null>(null);
-  const [companyFolderOptions, setCompanyFolderOptions] = useState<Record<string, string[]>>({});
-  const [newRuleForm, setNewRuleForm] = useState<{department: string; folderPath: string; type: 'allow'|'deny'}>({department: '', folderPath: '', type: 'allow'});
-  const [companyDeptOptions, setCompanyDeptOptions] = useState<Record<number, string[]>>({});
+  const [masterfolderFolderOptions, setmasterfolderFolderOptions] = useState<Record<string, string[]>>({});
+  const [newRuleForm, setNewRuleForm] = useState<{category: string; folderPath: string; type: 'allow'|'deny'}>({category: '', folderPath: '', type: 'allow'});
+  const [masterfolderDeptOptions, setmasterfolderDeptOptions] = useState<Record<number, string[]>>({});
   const [savingDetail, setSavingDetail] = useState(false);
   const [confirmUI, setConfirmUI] = useState<{
     title: string;
@@ -96,21 +97,21 @@ function UsersPageContent() {
     onConfirm: () => void | Promise<void>;
   } | null>(null);
 
-  const [newFolderRule, setNewFolderRule] = useState<{ companyId: number | ''; department: string; folderPath: string; isExclusion: boolean }>({ companyId: '', department: '', folderPath: '', isExclusion: false });
+  const [newFolderRule, setNewFolderRule] = useState<{ masterfolderId: number | ''; category: string; folderPath: string; isExclusion: boolean }>({ masterfolderId: '', category: '', folderPath: '', isExclusion: false });
 
-  const addFolderRule = (companyId: number) => {
-    if (!companyId || !newRuleForm.department || !newRuleForm.folderPath) return;
+  const addFolderRule = (masterfolderId: number) => {
+    if (!masterfolderId || !newRuleForm.category || !newRuleForm.folderPath) return;
     
     // Determine exclusion based on current access
-    const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyId);
-    const hasFullDeptAccess = Boolean(companyRows.find((x: CompanyAccess) => x.department === newRuleForm.department));
+    const masterfolderRows: masterfolderAccess[] = (detailPermData?.masterfolder_access || []).filter((x: masterfolderAccess) => Number(x.masterfolder_id) === masterfolderId);
+    const hasFullDeptAccess = Boolean(masterfolderRows.find((x: masterfolderAccess) => x.category === newRuleForm.category));
     const isExclusion = hasFullDeptAccess;
 
     setDetailPermData((p: any) => ({
       ...p,
       folder_access: [
         ...(p?.folder_access || []),
-        { company_id: companyId, department: newRuleForm.department, folder_path: newRuleForm.folderPath, is_exclusion: isExclusion }
+        { masterfolder_id: masterfolderId, category: newRuleForm.category, folder_path: newRuleForm.folderPath, is_exclusion: isExclusion }
       ]
     }));
     setNewRuleForm({ ...newRuleForm, folderPath: '' });
@@ -123,56 +124,44 @@ function UsersPageContent() {
     }));
   };
 
-  const fetchCompanyFolders = async (cid: number, dept: string) => {
-    if (!token || !cid || !dept) return;
-    const key = `${cid}_${dept}`;
-    if (companyFolderOptions[key]) return;
+  const fetchmasterfolderFolders = async (cid: number, category: string) => {
+    if (!token || !cid || !category) return;
+    const key = `${cid}_${category}`;
+    if (masterfolderFolderOptions[key]) return;
     try {
-      const res = await fetch(apiUrl(`/api/admin/folders?companyId=${cid}&department=${encodeURIComponent(dept)}`), {
+      const res = await fetch(apiUrl(`/api/admin/folders?masterfolderId=${cid}&category=${encodeURIComponent(category)}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json();
-      setCompanyFolderOptions(prev => ({ ...prev, [key]: Array.isArray(data) ? data : [] }));
+      setmasterfolderFolderOptions(prev => ({ ...prev, [key]: Array.isArray(data) ? data : [] }));
     } catch {}
   };
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-  const companyId = searchParams.get('companyId');
-  const fyId = searchParams.get('fyId');
+  const masterfolderId = searchParams.get('masterfolderId');
+  const dummyNull = searchParams.get('null');
 
-  const getDefaultDepartment = () => {
-    const primaryCompanyAccess = (detailPermData?.company_access || []).find((x: CompanyAccess) => Boolean(x?.is_primary));
-    return String(primaryCompanyAccess?.department || selectedUser?.department || departments[0] || '').trim();
+  const getDefaultCategory = () => {
+    const primarymasterfolderAccess = (detailPermData?.masterfolder_access || []).find((x: masterfolderAccess) => Boolean(x?.is_primary));
+    return String(primarymasterfolderAccess?.category || selectedUser?.category || categories[0] || '').trim();
   };
 
-  const fetchCompanyDepartments = useCallback(async (targetCompanyId: number, force = false) => {
+  const fetchmasterfolderCategories = useCallback(async (targetMasterfolderId: number) => {
     if (!token) return [];
-    if (!force && companyDeptOptions[targetCompanyId]) return companyDeptOptions[targetCompanyId];
     try {
-      const fyRes = await fetch(apiUrl(`/api/financial-years?companyId=${targetCompanyId}`), {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const fyData = fyRes.ok ? await fyRes.json() : [];
-      const fyRows = Array.isArray(fyData) ? fyData : [];
-      let targetFyId = Number(fyRows.find((x: any) => Number(x?.id) === Number(fyId))?.id || 0) || null;
-      if (!targetFyId) {
-        const active = fyRows.find((x: any) => x?.status === 'Active');
-        targetFyId = Number(active?.id || fyRows[0]?.id || 0) || null;
-      }
-      if (!targetFyId) return [];
-      const res = await fetch(apiUrl(`/api/admin/structure?companyId=${targetCompanyId}&fyId=${targetFyId}`), {
+      const res = await fetch(apiUrl(`/api/admin/structure?masterfolderId=${targetMasterfolderId}`), {
         headers: { Authorization: `Bearer ${token}` }
       });
       const data = await res.json().catch(() => ({}));
-      const names = Array.isArray(data?.departments)
-        ? data.departments.map((d: any) => String(d?.name || '').trim()).filter(Boolean)
+      const names = Array.isArray(data?.categories)
+        ? data.categories.map((d: any) => String(d?.name || '').trim()).filter(Boolean)
         : [];
-      setCompanyDeptOptions((prev) => ({ ...prev, [targetCompanyId]: names }));
+      setmasterfolderDeptOptions((prev) => ({ ...prev, [targetMasterfolderId]: names }));
       return names;
     } catch {
       return [];
     }
-  }, [token, fyId, companyDeptOptions]);
+  }, [token, masterfolderDeptOptions]);
 
   useEffect(() => {
     const t = localStorage.getItem('token');
@@ -188,8 +177,8 @@ function UsersPageContent() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (companyId) params.set('companyId', companyId);
-      if (fyId) params.set('fyId', fyId);
+      if (masterfolderId) params.set('masterfolderId', masterfolderId);
+      
       const endpoint = params.toString() ? `/api/users?${params.toString()}` : '/api/users';
       const res = await fetch(apiUrl(endpoint), { headers: { Authorization: `Bearer ${token}` } });
       setIsAdmin(res.status !== 403);
@@ -207,40 +196,40 @@ function UsersPageContent() {
       setUsers([]);
       setAlert({ title: 'Error', message: 'Failed to load users.', isError: true });
     } finally { setLoading(false); }
-  }, [token, companyId, fyId]);
+  }, [token, masterfolderId]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
-  const visibleUsers = users.filter((u) => String(u?.username || '').trim().toLowerCase() !== 'superadmin');
+  const visibleUsers = users.filter((u) => String(u?.username || '').trim().toLowerCase() !== 'superadmin' && u?.role !== 'Admin');
 
   const fetchMeta = useCallback(async () => {
     if (!token) return;
     try {
       const params = new URLSearchParams();
-      if (companyId) params.set('companyId', companyId);
-      if (fyId) params.set('fyId', fyId);
-      const [companyRes, searchOptionsRes] = await Promise.all([
-        fetch(apiUrl('/api/companies'), { headers: { Authorization: `Bearer ${token}` } }),
+      if (masterfolderId) params.set('masterfolderId', masterfolderId);
+      
+      const [masterfolderRes, searchOptionsRes] = await Promise.all([
+        fetch(apiUrl('/api/masterfolders'), { headers: { Authorization: `Bearer ${token}` } }),
         fetch(apiUrl(`/api/search/options${params.toString() ? `?${params.toString()}` : ''}`), { headers: { Authorization: `Bearer ${token}` } }),
       ]);
-      if (companyRes.ok) {
-        const c = await companyRes.json();
-        setCompanies(Array.isArray(c) ? c : []);
+      if (masterfolderRes.ok) {
+        const c = await masterfolderRes.json();
+        setmasterfolders(Array.isArray(c) ? c : []);
       }
       if (searchOptionsRes.ok) {
         const s = await searchOptionsRes.json();
-        const depts = Array.isArray(s?.departments) ? s.departments.map((d: string) => String(d).trim()).filter(Boolean) : [];
-        const merged = Array.from(new Set([...DEFAULT_DEPTS, ...depts]));
-        setDepartments(merged);
-        // Auto-initialize form.department to first option so user doesn't need to interact with dropdown
+        const categories = Array.isArray(s?.categories) ? s.categories.map((d: string) => String(d).trim()).filter(Boolean) : [];
+        const merged = Array.from(new Set([...DEFAULT_DEPTS, ...categories]));
+        setCategories(merged);
+        // Auto-initialize form.category to first option so user doesn't need to interact with dropdown
         if (merged.length > 0) {
-          setForm(prev => prev.department ? prev : { ...prev, department: merged[0] });
+          setForm(prev => prev.category ? prev : { ...prev, category: merged[0] });
         }
       }
     } catch {
       // keep defaults
     }
-  }, [token, companyId, fyId]);
+  }, [token, masterfolderId]);
 
   useEffect(() => { fetchMeta(); }, [fetchMeta]);
 
@@ -248,45 +237,47 @@ function UsersPageContent() {
     setSelectedUser(user);
     setDetailRole(user.role);
     setDetailStatus(user.status || 'Active');
-    const allowed = new Set(user.allowed_departments || []);
-    if (user.department) allowed.add(user.department);
+    const allowed = new Set(user.allowed_categories || []);
+    if (user.category) allowed.add(user.category);
     setDetailPermData({
-      allowed_departments: Array.from(allowed),
-      company_access: user.company_access || [],
+      allowed_categories: Array.from(allowed),
+      masterfolder_access: user.masterfolder_access || [],
       dept_upload_permissions: user.dept_upload_permissions || {},
-      can_bulk_move: user.can_bulk_move ?? true,
-      can_bulk_copy: user.can_bulk_copy ?? true,
+      can_bulk_move: user.can_bulk_move ?? false,
+      can_bulk_copy: user.can_bulk_copy ?? false,
       can_bulk_delete: user.can_bulk_delete ?? false,
-      can_bulk_rename: user.can_bulk_rename ?? true,
-      can_bulk_download: user.can_bulk_download ?? true,
+      can_bulk_rename: user.can_bulk_rename ?? false,
+      can_bulk_download: user.can_bulk_download ?? false,
+      can_download_folders: user.can_download_folders ?? false,
       can_upload_to_allowed: user.can_upload_to_allowed ?? false,
+      can_manage_structure: user.can_manage_structure ?? false,
       folder_access: user.folder_access || [],
     });
     setAccessPrompt(null);
-    setCompanyDeptPrompt(null);
+    setmasterfolderDeptPrompt(null);
   };
 
   const saveUserDetails = async () => {
     if (!selectedUser || !detailPermData) return;
-    const normalizedCompanyAccess = (detailPermData?.company_access || [])
-      .filter((x: CompanyAccess) => Number.isFinite(x.company_id));
+    const normalizedmasterfolderAccess = (detailPermData?.masterfolder_access || [])
+      .filter((x: masterfolderAccess) => Number.isFinite(x.masterfolder_id));
     
-    if (normalizedCompanyAccess.length === 0) {
-      return setAlert({ title: 'Validation Error', message: 'You must assign the user to at least one company.', isError: true });
+    if (normalizedmasterfolderAccess.length === 0) {
+      return setAlert({ title: 'Validation Error', message: 'You must assign the user to at least one masterfolder.', isError: true });
     }
 
     setSavingDetail(true);
     try {
-      const roleDepartment = String(selectedUser.department || getDefaultDepartment() || '').trim();
+      const roleCategory = String(selectedUser.category || getDefaultCategory() || '').trim();
       const roleRes = await fetch(apiUrl(`/api/users/${selectedUser.id}/role`), {
         method:'PUT',
         headers:{'Content-Type':'application/json', Authorization:`Bearer ${token}`},
-        body: JSON.stringify({ role: detailRole, department: roleDepartment })
+        body: JSON.stringify({ role: detailRole, category: roleCategory })
       });
       const roleData = await roleRes.json().catch(() => ({}));
       if (!roleRes.ok) {
         setSavingDetail(false);
-        return setAlert({ title:'Failed', message: roleData.error || 'Failed to update role/department', isError:true });
+        return setAlert({ title:'Failed', message: roleData.error || 'Failed to update role/category', isError:true });
       }
 
       if (detailStatus !== selectedUser.status) {
@@ -303,21 +294,21 @@ function UsersPageContent() {
       }
 
       // Normalized array is already defined at the start of the function
-      const mergedAllowedDepartments = Array.from(
+      const mergedAllowedCategories = Array.from(
         new Set([
           ...Object.keys(detailPermData?.dept_upload_permissions || {}),
-          ...normalizedCompanyAccess.map((x: any) => String(x.department || '').trim()),
-          ...(detailPermData?.folder_access || []).map((x: any) => String(x.department || '').trim()),
+          ...normalizedmasterfolderAccess.map((x: any) => String(x.category || '').trim()),
+          ...(detailPermData?.folder_access || []).map((x: any) => String(x.category || '').trim()),
         ].map((d) => String(d || '').trim()).filter(Boolean))
       );
 
       const permissionBody = {
         ...detailPermData,
-        allowed_departments: mergedAllowedDepartments,
-        company_access: normalizedCompanyAccess,
+        allowed_categories: mergedAllowedCategories,
+        masterfolder_access: normalizedmasterfolderAccess,
         folder_access: detailPermData?.folder_access || [],
         preference_updates: {
-          department_upload_permissions: detailPermData?.dept_upload_permissions || {}
+          category_upload_permissions: detailPermData?.dept_upload_permissions || {}
         }
       };
       const permRes = await fetch(apiUrl(`/api/users/${selectedUser.id}/permissions`), {
@@ -358,28 +349,28 @@ function UsersPageContent() {
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault(); setSubmitting(true);
-    const primaryCompanyId = Number((form as any).primary_company_id);
-    const primaryDepartment = String((form as any).department || '').trim() || departments[0] || '';
+    const primaryMasterfolderId = Number((form as any).primary_masterfolder_id);
+    const primaryCategory = String((form as any).category || '').trim() || categories[0] || '';
     const isFolderOnly = Boolean((form as any).folder_path);
-    const mergedAccess: CompanyAccess[] = [
+    const mergedAccess: masterfolderAccess[] = [
       {
-        company_id: primaryCompanyId,
-        company_name: companies.find((c) => c.id === primaryCompanyId)?.name,
-        department: isFolderOnly ? '' : primaryDepartment,
+        masterfolder_id: primaryMasterfolderId,
+        masterfolder_name: masterfolders.find((c) => c.id === primaryMasterfolderId)?.name,
+        category: isFolderOnly ? '' : primaryCategory,
         can_upload: true,
         is_primary: true,
       },
-      ...createCompanyAccess
-        .filter((a) => Number(a.company_id) !== primaryCompanyId || a.department !== primaryDepartment)
+      ...createmasterfolderAccess
+        .filter((a) => Number(a.masterfolder_id) !== primaryMasterfolderId || a.category !== primaryCategory)
         .map((a) => ({ ...a, is_primary: false })),
     ];
     const payload = {
       ...form,
-      primary_company_id: primaryCompanyId,
-      company_access: mergedAccess,
+      primary_masterfolder_id: primaryMasterfolderId,
+      masterfolder_access: mergedAccess,
       folder_access: (form as any).folder_path ? [{
-        company_id: primaryCompanyId,
-        department: primaryDepartment,
+        masterfolder_id: primaryMasterfolderId,
+        category: primaryCategory,
         folder_path: (form as any).folder_path,
         is_exclusion: false
       }] : []
@@ -392,32 +383,32 @@ function UsersPageContent() {
     setSubmitting(false);
     if (!res.ok) return setAlert({ title:'Error', message: data.error, isError:true });
     setForm({...emptyForm});
-    setCreateCompanyAccess([]);
+    setCreatemasterfolderAccess([]);
     setIsNewUserOpen(false);
     fetchUsers();
     setAlert({ title:'Done', message:`${form.username} added.`, isError:false });
   };
 
-  const promptCreateCompanyAccess = (companyIdValue: string) => {
-    const company_id = Number(companyIdValue);
-    if (!Number.isFinite(company_id)) return;
-    const company = companies.find((c) => c.id === company_id);
-    setCreateCompanyPrompt({
-      company_id,
-      company_name: company?.name || `Company ${company_id}`,
-      department: String((form as any).department || departments[0] || '').trim(),
+  const promptCreatemasterfolderAccess = (masterfolderIdValue: string) => {
+    const masterfolder_id = Number(masterfolderIdValue);
+    if (!Number.isFinite(masterfolder_id)) return;
+    const masterfolder = masterfolders.find((c) => c.id === masterfolder_id);
+    setCreatemasterfolderPrompt({
+      masterfolder_id,
+      masterfolder_name: masterfolder?.name || `masterfolder ${masterfolder_id}`,
+      category: String((form as any).category || categories[0] || '').trim(),
     });
   };
 
-  const applyCreateCompanyAccess = (canUpload: boolean) => {
-    if (!createCompanyPrompt) return;
-    setCreateCompanyAccess((prev) => {
+  const applyCreatemasterfolderAccess = (canUpload: boolean) => {
+    if (!createmasterfolderPrompt) return;
+    setCreatemasterfolderAccess((prev) => {
       const next = [...prev];
-      const idx = next.findIndex((x) => x.company_id === createCompanyPrompt.company_id && x.department === createCompanyPrompt.department);
-      const payload: CompanyAccess = {
-        company_id: createCompanyPrompt.company_id,
-        company_name: createCompanyPrompt.company_name,
-        department: createCompanyPrompt.department,
+      const idx = next.findIndex((x) => x.masterfolder_id === createmasterfolderPrompt.masterfolder_id && x.category === createmasterfolderPrompt.category);
+      const payload: masterfolderAccess = {
+        masterfolder_id: createmasterfolderPrompt.masterfolder_id,
+        masterfolder_name: createmasterfolderPrompt.masterfolder_name,
+        category: createmasterfolderPrompt.category,
         can_upload: canUpload,
         is_primary: false,
       };
@@ -425,7 +416,7 @@ function UsersPageContent() {
       else next.push(payload);
       return next;
     });
-    setCreateCompanyPrompt(null);
+    setCreatemasterfolderPrompt(null);
   };
 
   const handleStatusToggle = async (user: User) => {
@@ -467,112 +458,112 @@ function UsersPageContent() {
     });
   };
 
-  const setDetailDepartmentUpload = (dept: string, canUpload: boolean) => {
+  const setDetailCategoryUpload = (category: string, canUpload: boolean) => {
     setDetailPermData((p: any) => {
-      const allowed = Array.isArray(p?.allowed_departments) ? p.allowed_departments : [];
-      const allowedNext = allowed.includes(dept) ? allowed : [...allowed, dept];
+      const allowed = Array.isArray(p?.allowed_categories) ? p.allowed_categories : [];
+      const allowedNext = allowed.includes(category) ? allowed : [...allowed, category];
       return {
         ...p,
-        allowed_departments: allowedNext,
+        allowed_categories: allowedNext,
         dept_upload_permissions: {
           ...(p?.dept_upload_permissions || {}),
-          [dept]: canUpload,
+          [category]: canUpload,
         },
       };
     });
   };
 
-  const removeDetailDepartment = (dept: string) => {
+  const removeDetailCategory = (category: string) => {
     setDetailPermData((p: any) => {
       const nextUpload = { ...(p?.dept_upload_permissions || {}) };
-      delete nextUpload[dept];
+      delete nextUpload[category];
       return {
         ...p,
-        allowed_departments: (p?.allowed_departments || []).filter((d: string) => d !== dept),
-        company_access: (p?.company_access || []).filter((x: any) => x.department !== dept),
-        folder_access: (p?.folder_access || []).filter((x: any) => x.department !== dept),
+        allowed_categories: (p?.allowed_categories || []).filter((d: string) => d !== category),
+        masterfolder_access: (p?.masterfolder_access || []).filter((x: any) => x.category !== category),
+        folder_access: (p?.folder_access || []).filter((x: any) => x.category !== category),
         dept_upload_permissions: nextUpload,
       };
     });
   };
 
-  const toggleCompanyAccess = (companyId: number, checked: boolean) => {
-    const company = companies.find((c) => c.id === companyId);
+  const togglemasterfolderAccess = (masterfolderId: number, checked: boolean) => {
+    const masterfolder = masterfolders.find((c) => c.id === masterfolderId);
     setDetailPermData((p: any) => {
-      const current = Array.isArray(p?.company_access) ? [...p.company_access] : [];
+      const current = Array.isArray(p?.masterfolder_access) ? [...p.masterfolder_access] : [];
       if (!checked) {
-        const next = current.filter((x: CompanyAccess) => Number(x.company_id) !== companyId);
-        if (next.length > 0 && !next.some((x: CompanyAccess) => x.is_primary)) next[0].is_primary = true;
-        return { ...p, company_access: next };
+        const next = current.filter((x: masterfolderAccess) => Number(x.masterfolder_id) !== masterfolderId);
+        if (next.length > 0 && !next.some((x: masterfolderAccess) => x.is_primary)) next[0].is_primary = true;
+        return { ...p, masterfolder_access: next };
       }
-      if (current.some((x: CompanyAccess) => Number(x.company_id) === companyId)) return p;
-      const payload: CompanyAccess = {
-        company_id: companyId,
-        company_name: company?.name || `Company ${companyId}`,
-        department: getDefaultDepartment(),
+      if (current.some((x: masterfolderAccess) => Number(x.masterfolder_id) === masterfolderId)) return p;
+      const payload: masterfolderAccess = {
+        masterfolder_id: masterfolderId,
+        masterfolder_name: masterfolder?.name || `masterfolder ${masterfolderId}`,
+        category: getDefaultCategory(),
         can_upload: false,
         is_primary: current.length === 0,
       };
-      return { ...p, company_access: [...current, payload] };
+      return { ...p, masterfolder_access: [...current, payload] };
     });
   };
 
-  const setCompanyUploadMode = (companyId: number, canUpload: boolean) => {
+  const setmasterfolderUploadMode = (masterfolderId: number, canUpload: boolean) => {
     setDetailPermData((p: any) => {
-      const next = (Array.isArray(p?.company_access) ? [...p.company_access] : []).map((x: CompanyAccess) => (
-        Number(x.company_id) === companyId ? { ...x, can_upload: canUpload } : x
+      const next = (Array.isArray(p?.masterfolder_access) ? [...p.masterfolder_access] : []).map((x: masterfolderAccess) => (
+        Number(x.masterfolder_id) === masterfolderId ? { ...x, can_upload: canUpload } : x
       ));
-      return { ...p, company_access: next };
+      return { ...p, masterfolder_access: next };
     });
   };
 
-  const toggleCompanyDepartment = (companyId: number, dept: string, checked: boolean) => {
+  const togglemasterfolderCategory = (masterfolderId: number, category: string, checked: boolean) => {
     setDetailPermData((p: any) => {
-      const current: CompanyAccess[] = Array.isArray(p?.company_access) ? [...p.company_access] : [];
-      const companyName = companies.find((c) => c.id === companyId)?.name || `Company ${companyId}`;
-      const idx = current.findIndex((x) => Number(x.company_id) === companyId && x.department === dept);
+      const current: masterfolderAccess[] = Array.isArray(p?.masterfolder_access) ? [...p.masterfolder_access] : [];
+      const masterfolderName = masterfolders.find((c) => c.id === masterfolderId)?.name || `masterfolder ${masterfolderId}`;
+      const idx = current.findIndex((x) => Number(x.masterfolder_id) === masterfolderId && x.category === category);
 
       if (!checked) {
         if (idx === -1) return p;
         const next = current.filter((_, i) => i !== idx);
-        const companyRowsAfter = next.filter((x) => Number(x.company_id) === companyId);
-        if (companyRowsAfter.length === 0) {
+        const masterfolderRowsAfter = next.filter((x) => Number(x.masterfolder_id) === masterfolderId);
+        if (masterfolderRowsAfter.length === 0) {
            next.push({
-             company_id: companyId,
-             company_name: companyName,
-             department: '',
+             masterfolder_id: masterfolderId,
+             masterfolder_name: masterfolderName,
+             category: '',
              can_upload: false,
              is_primary: next.length === 0
            });
         }
         if (next.length > 0 && !next.some((x) => x.is_primary)) next[0].is_primary = true;
-        return { ...p, company_access: next };
+        return { ...p, masterfolder_access: next };
       }
 
       if (idx !== -1) return p;
-      const companyRows = current.filter((x) => Number(x.company_id) === companyId);
-      const companyReadOnly = companyRows.length > 0 ? !companyRows.some((x) => Boolean(x.can_upload)) : true;
-      const payload: CompanyAccess = {
-        company_id: companyId,
-        company_name: companyName,
-        department: dept,
-        can_upload: companyReadOnly ? false : true,
+      const masterfolderRows = current.filter((x) => Number(x.masterfolder_id) === masterfolderId);
+      const masterfolderReadOnly = masterfolderRows.length > 0 ? !masterfolderRows.some((x) => Boolean(x.can_upload)) : true;
+      const payload: masterfolderAccess = {
+        masterfolder_id: masterfolderId,
+        masterfolder_name: masterfolderName,
+        category: category,
+        can_upload: masterfolderReadOnly ? false : true,
         is_primary: current.length === 0,
       };
-      return { ...p, company_access: [...current, payload] };
+      return { ...p, masterfolder_access: [...current, payload] };
     });
   };
 
-  const setCompanyDepartmentMode = (companyId: number, dept: string, canUpload: boolean) => {
+  const setmasterfolderCategoryMode = (masterfolderId: number, category: string, canUpload: boolean) => {
     setDetailPermData((p: any) => {
-      const current: CompanyAccess[] = Array.isArray(p?.company_access) ? [...p.company_access] : [];
-      const companyRows = current.filter((x) => Number(x.company_id) === companyId);
-      const companyReadOnly = companyRows.length > 0 && !companyRows.some((x) => Boolean(x.can_upload));
-      if (companyReadOnly && canUpload) return p;
+      const current: masterfolderAccess[] = Array.isArray(p?.masterfolder_access) ? [...p.masterfolder_access] : [];
+      const masterfolderRows = current.filter((x) => Number(x.masterfolder_id) === masterfolderId);
+      const masterfolderReadOnly = masterfolderRows.length > 0 && !masterfolderRows.some((x) => Boolean(x.can_upload));
+      if (masterfolderReadOnly && canUpload) return p;
       const next = current.map((x) => (
-        Number(x.company_id) === companyId && x.department === dept ? { ...x, can_upload: canUpload } : x
+        Number(x.masterfolder_id) === masterfolderId && x.category === category ? { ...x, can_upload: canUpload } : x
       ));
-      return { ...p, company_access: next };
+      return { ...p, masterfolder_access: next };
     });
   };
 
@@ -582,7 +573,9 @@ function UsersPageContent() {
     { key: 'can_bulk_move',     label: 'Move',     danger: false },
     { key: 'can_bulk_copy',     label: 'Copy',     danger: false },
     { key: 'can_bulk_rename',   label: 'Rename',   danger: false },
-    { key: 'can_bulk_download', label: 'Download', danger: false },
+    { key: 'can_bulk_download', label: 'Download Files', danger: false },
+    { key: 'can_download_folders', label: 'Download Folders', danger: false },
+    { key: 'can_manage_structure', label: 'Manage Structure', danger: false },
   ];
 
   return (
@@ -635,7 +628,7 @@ function UsersPageContent() {
       <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
         <div>
           <h1 className="text-[32px] font-semibold tracking-[-0.45px] text-[var(--text-primary)] leading-tight">Users &amp; Roles</h1>
-          <p className="text-[14px] text-[var(--text-secondary)] mt-1">Create users, assign roles, and manage company/department access.</p>
+          <p className="text-[14px] text-[var(--text-secondary)] mt-1">Create users, assign roles, and manage masterfolder/category access.</p>
         </div>
         <div className="flex gap-2 overflow-x-auto no-scrollbar w-full sm:w-auto">
           <Link href="/admin/duplicates" className="flex items-center gap-1.5 px-4 py-2.5 rounded-[12px] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[13px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-all">
@@ -680,7 +673,7 @@ function UsersPageContent() {
                     {user.role}
                   </span>
                   <span className="px-2.5 py-1 rounded-full text-[11px] font-medium border border-[var(--border-subtle)] bg-[var(--bg-surface)] text-[var(--text-tertiary)]">
-                    {user.department || 'No dept'}
+                    {user.category || 'No category'}
                   </span>
                   <span className={`px-2.5 py-1 rounded-full text-[11px] font-medium border ${user.status === 'Suspended' ? 'border-[#ff3b30]/30 text-[#ff3b30] bg-[#ff3b30]/10' : 'border-[#34c759]/25 text-[#34c759] bg-[#34c759]/10'}`}>
                     {user.status}
@@ -734,41 +727,41 @@ function UsersPageContent() {
 
             <div className="px-8 pb-4">
               <div className="rounded-[16px] border border-[var(--border-subtle)] p-4 bg-[var(--bg-elevated)]/30">
-                <p className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.08em] mb-3">Company Access</p>
-                <p className="text-[12px] text-[var(--text-tertiary)] mb-3">Select company first, then choose departments inside it.</p>
+                <p className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.08em] mb-3">masterfolder Access</p>
+                <p className="text-[12px] text-[var(--text-tertiary)] mb-3">Select masterfolder first, then choose categories inside it.</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  {companies.map((company) => {
-                    const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === company.id);
-                    const enabled = companyRows.length > 0;
-                    const canUpload = companyRows.some((x: CompanyAccess) => Boolean(x.can_upload));
+                  {masterfolders.map((masterfolder) => {
+                    const masterfolderRows: masterfolderAccess[] = (detailPermData?.masterfolder_access || []).filter((x: masterfolderAccess) => Number(x.masterfolder_id) === masterfolder.id);
+                    const enabled = masterfolderRows.length > 0;
+                    const canUpload = masterfolderRows.some((x: masterfolderAccess) => Boolean(x.can_upload));
                     return (
-                      <div key={company.id} className="border border-[var(--border-subtle)] rounded-[12px] p-3 bg-[var(--bg-surface)]">
+                      <div key={masterfolder.id} className="border border-[var(--border-subtle)] rounded-[12px] p-3 bg-[var(--bg-surface)]">
                         <div className="flex items-center justify-between">
-                          <span className="text-[14px] font-semibold">{company.name}</span>
-                          <input type="checkbox" checked={enabled} onChange={(e) => toggleCompanyAccess(company.id, e.target.checked)} />
+                          <span className="text-[14px] font-semibold">{masterfolder.name}</span>
+                          <input type="checkbox" checked={enabled} onChange={(e) => togglemasterfolderAccess(masterfolder.id, e.target.checked)} />
                         </div>
                         {enabled && (
                           <div className="mt-2 flex items-center justify-between gap-2">
                             <span className="text-[12px] text-[var(--text-secondary)]">{canUpload ? 'Write' : 'Read'}</span>
                             <div className="flex items-center gap-1.5">
-                              <button onClick={() => setAccessPrompt({ type: 'company', label: company.name, companyId: company.id })} className="px-2.5 py-1.5 rounded-[8px] text-[11px] border bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)]">
+                              <button onClick={() => setAccessPrompt({ type: 'masterfolder', label: masterfolder.name, masterfolderId: masterfolder.id })} className="px-2.5 py-1.5 rounded-[8px] text-[11px] border bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)]">
                                 Mode
                               </button>
                               <button
                                 disabled={!enabled}
                                 onClick={async () => {
-                                  await fetchCompanyDepartments(company.id, true);
-                                  setCompanyDeptPrompt({ companyId: company.id, companyName: company.name });
+                                  await fetchmasterfolderCategories(masterfolder.id);
+                                  setmasterfolderDeptPrompt({ masterfolderId: masterfolder.id, masterfolderName: masterfolder.name });
                                 }}
                                 className="px-2.5 py-1.5 rounded-[8px] text-[11px] border bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] disabled:opacity-45 disabled:cursor-not-allowed"
                               >
-                                Departments
+                                Categories
                               </button>
                               <button
                                 disabled={!enabled}
                                 onClick={async () => {
-                                  await fetchCompanyDepartments(company.id, true);
-                                  setCompanyFolderPrompt({ companyId: company.id, companyName: company.name });
+                                  await fetchmasterfolderCategories(masterfolder.id, true);
+                                  setmasterfolderFolderPrompt({ masterfolderId: masterfolder.id, masterfolderName: masterfolder.name });
                                 }}
                                 className="px-2.5 py-1.5 rounded-[8px] text-[11px] border bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] disabled:opacity-45 disabled:cursor-not-allowed"
                               >
@@ -778,7 +771,7 @@ function UsersPageContent() {
                           </div>
                         )}
                         {!enabled && (
-                          <p className="text-[11px] text-[var(--text-tertiary)] mt-2">Enable company to configure departments.</p>
+                          <p className="text-[11px] text-[var(--text-tertiary)] mt-2">Enable masterfolder to configure categories.</p>
                         )}
                       </div>
                     );
@@ -798,7 +791,17 @@ function UsersPageContent() {
                     return (
                       <button
                         key={key}
-                        onClick={() => setDetailPermData((p: any) => ({ ...p, [key]: !p[key] }))}
+                        onClick={() => setDetailPermData((p: any) => { 
+                          const nextVal = !p[key]; 
+                          const updates: any = { [key]: nextVal }; 
+                          if (key === 'can_download_folders' && nextVal) { 
+                            updates.can_bulk_download = true; 
+                          } 
+                          if (key === 'can_bulk_download' && !nextVal) { 
+                            updates.can_download_folders = false; 
+                          } 
+                          return { ...p, ...updates }; 
+                        })}
                         className={`px-3 py-2.5 rounded-[12px] text-[12px] font-semibold border ${
                           on
                             ? danger
@@ -832,7 +835,7 @@ function UsersPageContent() {
             </div>
             </div>
 
-            {accessPrompt && !companyDeptPrompt && (
+            {accessPrompt && !masterfolderDeptPrompt && (
               <div className="absolute inset-0 bg-black/35 flex items-center justify-center p-4">
                 <div className="w-full max-w-[320px] rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-[var(--shadow-medium)] p-4">
                   <p className="text-[15px] font-semibold text-[var(--text-primary)]">{accessPrompt.label}</p>
@@ -840,10 +843,10 @@ function UsersPageContent() {
                   <div className="grid grid-cols-2 gap-2 mt-4">
                     <button
                       onClick={() => {
-                        if (accessPrompt.type === 'department' && accessPrompt.department) setDetailDepartmentUpload(accessPrompt.department, false);
-                        if (accessPrompt.type === 'company' && accessPrompt.companyId) {
-                          if (accessPrompt.department) setCompanyDepartmentMode(accessPrompt.companyId, accessPrompt.department, false);
-                          else setCompanyUploadMode(accessPrompt.companyId, false);
+                        if (accessPrompt.type === 'category' && accessPrompt.category) setDetailCategoryUpload(accessPrompt.category, false);
+                        if (accessPrompt.type === 'masterfolder' && accessPrompt.masterfolderId) {
+                          if (accessPrompt.category) setmasterfolderCategoryMode(accessPrompt.masterfolderId, accessPrompt.category, false);
+                          else setmasterfolderUploadMode(accessPrompt.masterfolderId, false);
                         }
                         setAccessPrompt(null);
                       }}
@@ -853,10 +856,10 @@ function UsersPageContent() {
                     </button>
                     <button
                       onClick={() => {
-                        if (accessPrompt.type === 'department' && accessPrompt.department) setDetailDepartmentUpload(accessPrompt.department, true);
-                        if (accessPrompt.type === 'company' && accessPrompt.companyId) {
-                          if (accessPrompt.department) setCompanyDepartmentMode(accessPrompt.companyId, accessPrompt.department, true);
-                          else setCompanyUploadMode(accessPrompt.companyId, true);
+                        if (accessPrompt.type === 'category' && accessPrompt.category) setDetailCategoryUpload(accessPrompt.category, true);
+                        if (accessPrompt.type === 'masterfolder' && accessPrompt.masterfolderId) {
+                          if (accessPrompt.category) setmasterfolderCategoryMode(accessPrompt.masterfolderId, accessPrompt.category, true);
+                          else setmasterfolderUploadMode(accessPrompt.masterfolderId, true);
                         }
                         setAccessPrompt(null);
                       }}
@@ -870,33 +873,33 @@ function UsersPageContent() {
               </div>
             )}
 
-            {companyDeptPrompt && (
+            {masterfolderDeptPrompt && (
               <div className="absolute inset-0 bg-black/35 flex items-center justify-center p-4">
                 <div className="w-full max-w-[560px] rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-[var(--shadow-medium)] p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div>
-                      <p className="text-[16px] font-semibold text-[var(--text-primary)]">{companyDeptPrompt.companyName}</p>
-                      <p className="text-[12px] text-[var(--text-secondary)]">Select department access for this company</p>
+                      <p className="text-[16px] font-semibold text-[var(--text-primary)]">{masterfolderDeptPrompt.masterfolderName}</p>
+                      <p className="text-[12px] text-[var(--text-secondary)]">Select category access for this masterfolder</p>
                     </div>
-                    <button onClick={() => setCompanyDeptPrompt(null)} className="w-8 h-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-neutral)] flex items-center justify-center">
+                    <button onClick={() => setmasterfolderDeptPrompt(null)} className="w-8 h-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-neutral)] flex items-center justify-center">
                       <X size={13} />
                     </button>
                   </div>
                   <div className="max-h-[52vh] overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {(companyDeptOptions[companyDeptPrompt.companyId] || []).map((dept) => {
-                      const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyDeptPrompt.companyId);
-                      const companyReadOnly = companyRows.length > 0 && !companyRows.some((x: CompanyAccess) => Boolean(x.can_upload));
-                      const row = companyRows.find((x: CompanyAccess) => x.department === dept);
+                    {(masterfolderDeptOptions[masterfolderDeptPrompt.masterfolderId] || []).map((category) => {
+                      const masterfolderRows: masterfolderAccess[] = (detailPermData?.masterfolder_access || []).filter((x: masterfolderAccess) => Number(x.masterfolder_id) === masterfolderDeptPrompt.masterfolderId);
+                      const masterfolderReadOnly = masterfolderRows.length > 0 && !masterfolderRows.some((x: masterfolderAccess) => Boolean(x.can_upload));
+                      const row = masterfolderRows.find((x: masterfolderAccess) => x.category === category);
                       const enabled = Boolean(row);
                       const deptCanUpload = Boolean(row?.can_upload);
                       return (
-                        <div key={dept} className="border border-[var(--border-subtle)] rounded-[12px] p-3 bg-[var(--bg-elevated)]/25">
+                        <div key={category} className="border border-[var(--border-subtle)] rounded-[12px] p-3 bg-[var(--bg-elevated)]/25">
                           <div className="flex items-center justify-between">
-                            <span className="text-[14px] font-semibold text-[var(--text-primary)]">{dept}</span>
+                            <span className="text-[14px] font-semibold text-[var(--text-primary)]">{category}</span>
                             <input
                               type="checkbox"
                               checked={enabled}
-                              onChange={(e) => toggleCompanyDepartment(companyDeptPrompt.companyId, dept, e.target.checked)}
+                              onChange={(e) => togglemasterfolderCategory(masterfolderDeptPrompt.masterfolderId, category, e.target.checked)}
                             />
                           </div>
                           {enabled && (
@@ -904,7 +907,7 @@ function UsersPageContent() {
                               <span className="text-[12px] text-[var(--text-secondary)]">{deptCanUpload ? 'Write' : 'Read'}</span>
                               <div className="flex items-center gap-1.5">
                                 <button
-                                  onClick={() => setCompanyDepartmentMode(companyDeptPrompt.companyId, dept, false)}
+                                  onClick={() => setmasterfolderCategoryMode(masterfolderDeptPrompt.masterfolderId, category, false)}
                                   className={`px-2.5 py-1.5 rounded-[8px] text-[11px] border ${
                                     !deptCanUpload
                                       ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent)]/35'
@@ -914,7 +917,7 @@ function UsersPageContent() {
                                   Read
                                 </button>
                                 <button
-                                  onClick={() => setCompanyDepartmentMode(companyDeptPrompt.companyId, dept, true)}
+                                  onClick={() => setmasterfolderCategoryMode(masterfolderDeptPrompt.masterfolderId, category, true)}
                                   className={`px-2.5 py-1.5 rounded-[8px] text-[11px] border disabled:opacity-45 disabled:cursor-not-allowed ${
                                     deptCanUpload
                                       ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent)]/35'
@@ -929,26 +932,26 @@ function UsersPageContent() {
                         </div>
                       );
                     })}
-                    {(companyDeptOptions[companyDeptPrompt.companyId] || []).length === 0 && (
+                    {(masterfolderDeptOptions[masterfolderDeptPrompt.masterfolderId] || []).length === 0 && (
                       <div className="sm:col-span-2 text-[12px] text-[var(--text-tertiary)] border border-[var(--border-subtle)] rounded-[12px] p-3 bg-[var(--bg-elevated)]/25">
-                        No departments found for this company/FY. Create them in Admin → Departments &amp; Folders.
+                        No categories found for this masterfolder/FY. Create them in Admin → Categories &amp; Folders.
                       </div>
                     )}
                   </div>
-                  <button onClick={() => setCompanyDeptPrompt(null)} className="w-full mt-3 py-2.5 rounded-[10px] text-[13px] font-semibold border border-[var(--border-subtle)] bg-[var(--bg-neutral)] text-[var(--text-secondary)]">Done</button>
+                  <button onClick={() => setmasterfolderDeptPrompt(null)} className="w-full mt-3 py-2.5 rounded-[10px] text-[13px] font-semibold border border-[var(--border-subtle)] bg-[var(--bg-neutral)] text-[var(--text-secondary)]">Done</button>
                 </div>
               </div>
             )}
 
-            {companyFolderPrompt && (
+            {masterfolderFolderPrompt && (
               <div className="absolute inset-0 bg-black/35 flex items-center justify-center p-4 z-50">
                 <div className="w-full max-w-[600px] rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-[var(--shadow-medium)] p-4 flex flex-col max-h-[90vh]">
                   <div className="flex items-center justify-between mb-3 shrink-0">
                     <div>
-                      <p className="text-[16px] font-semibold text-[var(--text-primary)]">{companyFolderPrompt.companyName}</p>
-                      <p className="text-[12px] text-[var(--text-secondary)]">Manage folder access for this company</p>
+                      <p className="text-[16px] font-semibold text-[var(--text-primary)]">{masterfolderFolderPrompt.masterfolderName}</p>
+                      <p className="text-[12px] text-[var(--text-secondary)]">Manage folder access for this masterfolder</p>
                     </div>
-                    <button onClick={() => setCompanyFolderPrompt(null)} className="w-8 h-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-neutral)] flex items-center justify-center">
+                    <button onClick={() => setmasterfolderFolderPrompt(null)} className="w-8 h-8 rounded-full border border-[var(--border-subtle)] bg-[var(--bg-neutral)] flex items-center justify-center">
                       <X size={13} />
                     </button>
                   </div>
@@ -958,7 +961,7 @@ function UsersPageContent() {
                     <div>
                       <p className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.08em] mb-2">Active Folder Rules</p>
                       <div className="space-y-2">
-                        {(detailPermData?.folder_access || []).filter((fa: any) => fa.company_id === companyFolderPrompt.companyId).map((fa: any, idx: number) => {
+                        {(detailPermData?.folder_access || []).filter((fa: any) => fa.masterfolder_id === masterfolderFolderPrompt.masterfolderId).map((fa: any, idx: number) => {
                            // Find real index in the global array to remove it correctly
                            const realIdx = detailPermData.folder_access.findIndex((x: any) => x === fa);
                            return (
@@ -967,7 +970,7 @@ function UsersPageContent() {
                                  <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${fa.is_exclusion ? 'bg-[#ff3b30]/10 text-[#ff3b30]' : 'bg-[#34c759]/10 text-[#34c759]'}`}>
                                    {fa.is_exclusion ? 'EXCLUDE' : 'INCLUDE'}
                                  </span>
-                                 <span className="text-[13px] font-medium text-[var(--text-primary)]">{fa.department} › <span className="font-bold">{fa.folder_path}</span></span>
+                                 <span className="text-[13px] font-medium text-[var(--text-primary)]">{fa.category} › <span className="font-bold">{fa.folder_path}</span></span>
                                </div>
                                <button onClick={() => removeFolderRule(realIdx)} className="text-[var(--text-tertiary)] hover:text-[#ff3b30] p-1">
                                  <X size={14} />
@@ -975,8 +978,8 @@ function UsersPageContent() {
                              </div>
                            );
                         })}
-                        {!(detailPermData?.folder_access || []).some((fa: any) => fa.company_id === companyFolderPrompt.companyId) && (
-                          <p className="text-[13px] text-[var(--text-tertiary)] italic">No folder rules active for this company.</p>
+                        {!(detailPermData?.folder_access || []).some((fa: any) => fa.masterfolder_id === masterfolderFolderPrompt.masterfolderId) && (
+                          <p className="text-[13px] text-[var(--text-tertiary)] italic">No folder rules active for this masterfolder.</p>
                         )}
                       </div>
                     </div>
@@ -987,23 +990,23 @@ function UsersPageContent() {
                       
                       <div className="flex flex-col sm:flex-row items-end gap-2">
                         <div className="flex-1 w-full">
-                          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Department</label>
+                          <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Category</label>
                           <CustomSelect 
-                            value={newRuleForm.department} 
+                            value={newRuleForm.category} 
                             onChange={(val) => {
-                              const dept = val;
-                              const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyFolderPrompt.companyId);
-                              const hasFullDeptAccess = Boolean(companyRows.find((x: CompanyAccess) => x.department === dept));
+                              const category = val;
+                              const masterfolderRows: masterfolderAccess[] = (detailPermData?.masterfolder_access || []).filter((x: masterfolderAccess) => Number(x.masterfolder_id) === masterfolderFolderPrompt.masterfolderId);
+                              const hasFullDeptAccess = Boolean(masterfolderRows.find((x: masterfolderAccess) => x.category === category));
                               
                               setNewRuleForm({ 
                                 ...newRuleForm, 
-                                department: dept, 
+                                category: category, 
                                 folderPath: '',
                                 type: hasFullDeptAccess ? 'deny' : 'allow'
                               });
-                              if (dept) fetchCompanyFolders(companyFolderPrompt.companyId, dept);
+                              if (category) fetchmasterfolderFolders(masterfolderFolderPrompt.masterfolderId, category);
                             }}
-                            options={(companyDeptOptions[companyFolderPrompt.companyId] || []).map(d => ({ label: d, value: d }))}
+                            options={(masterfolderDeptOptions[masterfolderFolderPrompt.masterfolderId] || []).map(d => ({ label: d, value: d }))}
                             placeholder="Select Dept"
                           />
                         </div>
@@ -1013,8 +1016,8 @@ function UsersPageContent() {
                           <CustomSelect 
                             value={newRuleForm.folderPath}
                             onChange={(val) => setNewRuleForm({...newRuleForm, folderPath: val})}
-                            disabled={!newRuleForm.department}
-                            options={(companyFolderOptions[`${companyFolderPrompt.companyId}_${newRuleForm.department}`] || []).map(f => ({ label: f, value: f }))}
+                            disabled={!newRuleForm.category}
+                            options={(masterfolderFolderOptions[`${masterfolderFolderPrompt.masterfolderId}_${newRuleForm.category}`] || []).map(f => ({ label: f, value: f }))}
                             placeholder="Select Folder"
                           />
                         </div>
@@ -1022,20 +1025,20 @@ function UsersPageContent() {
                         <div className="flex-1 w-full sm:w-auto min-w-[100px]">
                           <label className="block text-[11px] font-semibold text-[var(--text-secondary)] mb-1">Rule Type</label>
                           {(() => {
-                             const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyFolderPrompt.companyId);
-                             const hasFullDeptAccess = Boolean(companyRows.find((x: CompanyAccess) => x.department === newRuleForm.department));
+                             const masterfolderRows: masterfolderAccess[] = (detailPermData?.masterfolder_access || []).filter((x: masterfolderAccess) => Number(x.masterfolder_id) === masterfolderFolderPrompt.masterfolderId);
+                             const hasFullDeptAccess = Boolean(masterfolderRows.find((x: masterfolderAccess) => x.category === newRuleForm.category));
                              
                              return (
                                <div className="w-full bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[10px] px-4 text-[14px] text-[var(--text-tertiary)] flex items-center h-[42px] cursor-not-allowed">
-                                 {newRuleForm.department ? (hasFullDeptAccess ? 'Exclude' : 'Include') : '-'}
+                                 {newRuleForm.category ? (hasFullDeptAccess ? 'Exclude' : 'Include') : '-'}
                                </div>
                              );
                           })()}
                         </div>
 
                         <button 
-                          onClick={() => addFolderRule(companyFolderPrompt.companyId)}
-                          disabled={!newRuleForm.department || !newRuleForm.folderPath}
+                          onClick={() => addFolderRule(masterfolderFolderPrompt.masterfolderId)}
+                          disabled={!newRuleForm.category || !newRuleForm.folderPath}
                           className="w-full sm:w-auto px-3 py-1.5 rounded-[8px] bg-[var(--text-primary)] text-[var(--bg-app)] text-[12px] font-semibold disabled:opacity-50"
                         >
                           Add
@@ -1043,18 +1046,18 @@ function UsersPageContent() {
                       </div>
                       
                       {(() => {
-                         if (!newRuleForm.department) return null;
-                         const companyRows: CompanyAccess[] = (detailPermData?.company_access || []).filter((x: CompanyAccess) => Number(x.company_id) === companyFolderPrompt.companyId);
-                         const hasFullDeptAccess = Boolean(companyRows.find((x: CompanyAccess) => x.department === newRuleForm.department));
+                         if (!newRuleForm.category) return null;
+                         const masterfolderRows: masterfolderAccess[] = (detailPermData?.masterfolder_access || []).filter((x: masterfolderAccess) => Number(x.masterfolder_id) === masterfolderFolderPrompt.masterfolderId);
+                         const hasFullDeptAccess = Boolean(masterfolderRows.find((x: masterfolderAccess) => x.category === newRuleForm.category));
                          if (hasFullDeptAccess) {
-                           return <p className="text-[11px] text-[var(--text-secondary)]">The user has full access to this department. You can only select folders to exclude from their view.</p>;
+                           return <p className="text-[11px] text-[var(--text-secondary)]">The user has full access to this category. You can only select folders to exclude from their view.</p>;
                          }
-                         return <p className="text-[11px] text-[var(--text-secondary)]">The user does NOT have full access to this department. You can select folders to explicitly include for them.</p>;
+                         return <p className="text-[11px] text-[var(--text-secondary)]">The user does NOT have full access to this category. You can select folders to explicitly include for them.</p>;
                       })()}
                     </div>
                   </div>
 
-                  <button onClick={() => setCompanyFolderPrompt(null)} className="w-full mt-3 py-2.5 rounded-[10px] text-[13px] font-semibold border border-[var(--border-subtle)] bg-[var(--bg-neutral)] text-[var(--text-secondary)] shrink-0">Done</button>
+                  <button onClick={() => setmasterfolderFolderPrompt(null)} className="w-full mt-3 py-2.5 rounded-[10px] text-[13px] font-semibold border border-[var(--border-subtle)] bg-[var(--bg-neutral)] text-[var(--text-secondary)] shrink-0">Done</button>
                 </div>
               </div>
             )}
@@ -1077,7 +1080,7 @@ function UsersPageContent() {
               </button>
             </div>
             <form onSubmit={handleCreate} className="px-7 py-5 flex flex-col gap-4">
-              {[{label:'Username',key:'username',type:'text',ph:'john.doe'},{label:'Email',key:'email',type:'email',ph:'john@company.com'},{label:'Password',key:'password',type:'password',ph:'Min 8 characters'}].map(f => (
+              {[{label:'Username',key:'username',type:'text',ph:'john.doe'},{label:'Email',key:'email',type:'email',ph:'john@masterfolder.com'},{label:'Password',key:'password',type:'password',ph:'Min 8 characters'}].map(f => (
                 <div key={f.key}>
                   <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">{f.label}</label>
                   <input required type={f.type} value={(form as any)[f.key]} onChange={e => setForm(p => ({...p, [f.key]: e.target.value}))} placeholder={f.ph}
@@ -1085,41 +1088,41 @@ function UsersPageContent() {
                 </div>
               ))}
               <div>
-                <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Company</label>
+                <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">masterfolder</label>
                 <CustomSelect
-                  value={(form as any).primary_company_id}
+                  value={(form as any).primary_masterfolder_id}
                   onChange={async (val) => {
-                    setForm(p => ({...p, primary_company_id: val}));
+                    setForm(p => ({...p, primary_masterfolder_id: val}));
                     const cid = Number(val);
                     if (cid) {
-                      const depts = await fetchCompanyDepartments(cid);
-                      if (depts && depts.length > 0) {
-                        setForm(p => ({...p, department: depts[0]}));
+                      const categories = await fetchmasterfolderCategories(cid);
+                      if (categories && categories.length > 0) {
+                        setForm(p => ({...p, category: categories[0]}));
                       } else {
-                        setForm(p => ({...p, department: ''}));
+                        setForm(p => ({...p, category: ''}));
                       }
                     }
                   }}
                   options={[
-                    { label: 'Select company', value: '' },
-                    ...companies.map(c => ({ label: c.name, value: c.id.toString() }))
+                    { label: 'Select masterfolder', value: '' },
+                    ...masterfolders.map(c => ({ label: c.name, value: c.id.toString() }))
                   ]}
-                  placeholder="Select company"
+                  placeholder="Select masterfolder"
                 />
               </div>
 
               <div className="grid grid-cols-2 md:grid-cols-3 gap-3 z-40">
                 <div>
-                  <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Department</label>
+                  <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Category</label>
                   <CustomSelect 
-                    value={(form as any).department} 
+                    value={(form as any).category} 
                     onChange={val => {
-                        setForm(p => ({...p, department: val, folder_path: ''})); 
-                        if (val && (form as any).primary_company_id) fetchCompanyFolders(Number((form as any).primary_company_id), val);
+                        setForm(p => ({...p, category: val, folder_path: ''})); 
+                        if (val && (form as any).primary_masterfolder_id) fetchmasterfolderFolders(Number((form as any).primary_masterfolder_id), val);
                     }}
-                    options={(((form as any).primary_company_id && companyDeptOptions[Number((form as any).primary_company_id)]) 
-                      ? companyDeptOptions[Number((form as any).primary_company_id)]
-                      : departments).map(o => ({ label: o, value: o }))
+                    options={((form as any).primary_masterfolder_id 
+                      ? (masterfolderDeptOptions[Number((form as any).primary_masterfolder_id)] || [])
+                      : categories).map(o => ({ label: o, value: o }))
                     }
                   />
                 </div>
@@ -1128,8 +1131,8 @@ function UsersPageContent() {
                   <CustomSelect 
                     value={(form as any).folder_path || ''} 
                     onChange={val => setForm(p => ({...p, folder_path: val}))}
-                    options={((form as any).primary_company_id && (form as any).department) 
-                      ? (companyFolderOptions[`${(form as any).primary_company_id}_${(form as any).department}`] || []).map(f => ({ label: f, value: f })) 
+                    options={((form as any).primary_masterfolder_id && (form as any).category) 
+                      ? (masterfolderFolderOptions[`${(form as any).primary_masterfolder_id}_${(form as any).category}`] || []).map(f => ({ label: f, value: f })) 
                       : []
                     }
                   />
@@ -1144,7 +1147,7 @@ function UsersPageContent() {
                 </div>
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" onClick={() => { setIsNewUserOpen(false); setForm({...emptyForm}); setCreateCompanyAccess([]); }} className="flex-1 py-2.5 rounded-[10px] bg-[var(--bg-neutral)] text-[14px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-all border border-[var(--border-subtle)]">Cancel</button>
+                <button type="button" onClick={() => { setIsNewUserOpen(false); setForm({...emptyForm}); setCreatemasterfolderAccess([]); }} className="flex-1 py-2.5 rounded-[10px] bg-[var(--bg-neutral)] text-[14px] font-bold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-all border border-[var(--border-subtle)]">Cancel</button>
                 <button type="submit" disabled={submitting} className="flex-1 py-2.5 rounded-[10px] bg-[var(--text-primary)] text-[14px] font-bold text-[var(--bg-app)] hover:opacity-90 transition-opacity disabled:opacity-50">
                   {submitting ? 'Creating...' : 'Create User'}
                 </button>
@@ -1154,31 +1157,31 @@ function UsersPageContent() {
         </div>
       )}
 
-      {createCompanyPrompt && (
+      {createmasterfolderPrompt && (
         <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/40 backdrop-blur-[2px] p-4">
           <div className="bg-[var(--bg-surface)] rounded-[16px] shadow-[var(--shadow-medium)] w-full max-w-[420px] border border-[var(--border-subtle)] p-6">
-            <h3 className="text-[17px] font-bold text-[var(--text-primary)]">Add Company Access</h3>
+            <h3 className="text-[17px] font-bold text-[var(--text-primary)]">Add masterfolder Access</h3>
             <p className="text-[13px] text-[var(--text-secondary)] mt-2">
-              {createCompanyPrompt.company_name}: pick department + access mode.
+              {createmasterfolderPrompt.masterfolder_name}: pick category + access mode.
             </p>
             <div className="mt-3">
-              <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Department</label>
+              <label className="block text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-widest mb-1.5">Category</label>
               <CustomSelect
-                value={createCompanyPrompt.department}
-                onChange={(val) => setCreateCompanyPrompt((p) => p ? { ...p, department: val } : p)}
-                options={departments.map(d => ({ label: d, value: d }))}
+                value={createmasterfolderPrompt.category}
+                onChange={(val) => setCreatemasterfolderPrompt((p) => p ? { ...p, category: val } : p)}
+                options={categories.map(d => ({ label: d, value: d }))}
                 placeholder="-- Select Default Dept --"
               />
             </div>
             <div className="mt-5 flex gap-2">
-              <button type="button" onClick={() => applyCreateCompanyAccess(false)} className="flex-1 py-2.5 rounded-[10px] bg-[var(--bg-neutral)] text-[14px] font-bold text-[var(--text-secondary)] border border-[var(--border-subtle)]">
+              <button type="button" onClick={() => applyCreatemasterfolderAccess(false)} className="flex-1 py-2.5 rounded-[10px] bg-[var(--bg-neutral)] text-[14px] font-bold text-[var(--text-secondary)] border border-[var(--border-subtle)]">
                 Read Only
               </button>
-              <button type="button" onClick={() => applyCreateCompanyAccess(true)} className="flex-1 py-2.5 rounded-[10px] bg-[var(--text-primary)] text-[14px] font-bold text-[var(--bg-app)]">
+              <button type="button" onClick={() => applyCreatemasterfolderAccess(true)} className="flex-1 py-2.5 rounded-[10px] bg-[var(--text-primary)] text-[14px] font-bold text-[var(--bg-app)]">
                 Allow Upload
               </button>
             </div>
-            <button type="button" onClick={() => setCreateCompanyPrompt(null)} className="mt-2 w-full py-2 rounded-[10px] text-[12px] text-[var(--text-tertiary)]">Cancel</button>
+            <button type="button" onClick={() => setCreatemasterfolderPrompt(null)} className="mt-2 w-full py-2 rounded-[10px] text-[12px] text-[var(--text-tertiary)]">Cancel</button>
           </div>
         </div>
       )}

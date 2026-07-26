@@ -11,8 +11,8 @@ import { apiUrl } from '@/lib/api';
 function AdminDashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const companyId = searchParams.get('companyId');
-  const fyId = searchParams.get('fyId');
+  const masterfolderId = searchParams.get('masterfolderId');
+  const dummyNull = searchParams.get('null');
 
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -33,8 +33,7 @@ function AdminDashboardContent() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (companyId) params.set('companyId', companyId);
-      if (fyId) params.set('fyId', fyId);
+      if (masterfolderId) params.set('masterfolderId', masterfolderId);
       const url = apiUrl(`/api/admin/dashboard${params.toString() ? '?' + params.toString() : ''}`);
       const res = await fetch(url, {
         headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
@@ -45,7 +44,7 @@ function AdminDashboardContent() {
     } finally {
       setLoading(false);
     }
-  }, [isAuthorized, companyId, fyId]);
+  }, [isAuthorized, masterfolderId]);
 
   useEffect(() => {
     fetchDashboard();
@@ -59,12 +58,9 @@ function AdminDashboardContent() {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
-  // Navigate to sub-admin pages preserving companyId/fyId
+  // Navigate to sub-admin pages
   const navTo = (path: string) => {
-    const p = new URLSearchParams();
-    if (companyId) p.set('companyId', companyId);
-    if (fyId) p.set('fyId', fyId);
-    router.push(p.toString() ? `${path}?${p.toString()}` : path);
+    router.push(path);
   };
 
   if (!isAuthorized || loading || !data) {
@@ -92,12 +88,13 @@ function AdminDashboardContent() {
     );
   }
 
-  const { system_health, departments, active_users, duplicates, recent_audit, company_fy_overview } = data;
+  const { system_health, categories, active_users, duplicates, recent_audit, company_fy_overview } = data;
+  const masterfolder_fy_overview = company_fy_overview || [];
   const s = system_health.server_storage;
   const storageDevices: any[] = Array.isArray(system_health.storage_devices) ? system_health.storage_devices : [];
-  const companyStorage = system_health.company_storage;
-  const filterLabel = companyId && fyId
-    ? company_fy_overview.find((r: any) => String(r.company_id) === String(companyId) && String(r.fy_id) === String(fyId))
+  const masterfolderStorage = system_health.masterfolder_storage;
+  const filterLabel = masterfolderId
+    ? masterfolder_fy_overview.find((r: any) => String(r.masterfolder_id) === String(masterfolderId))
     : null;
 
   return (
@@ -107,12 +104,6 @@ function AdminDashboardContent() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <h1 className="text-[32px] font-bold tracking-tight text-[var(--text-primary)]">Admin Dashboard</h1>
-          {filterLabel && (
-            <p className="text-[13px] text-[var(--text-tertiary)] mt-1">
-              Showing data for <span className="font-semibold text-[var(--accent)]">{filterLabel.company_name}</span> — {filterLabel.fy_name}
-            </p>
-          )}
-          {!companyId && <p className="text-[13px] text-[var(--text-tertiary)] mt-1">Showing global data — select a Company &amp; FY from the top bar to filter</p>}
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -132,9 +123,9 @@ function AdminDashboardContent() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { label: 'Users & Roles', path: '/admin/users', icon: Users, desc: 'Manage accounts & permissions' },
-          { label: 'Companies & FY', path: '/admin/companies', icon: Building, desc: 'Manage company structure & fiscal years' },
+          { label: 'Masterfolders', path: '/admin/masterfolders', icon: Building, desc: 'Manage masterfolder structure' },
           { label: 'Backups & Restore', path: '/admin/backups', icon: Database, desc: 'Review snapshots and restore by date' },
-          { label: 'Departments & Folders', path: '/admin/structure', icon: Layers, desc: 'Create and manage vault structure (per Company & FY)' },
+          { label: 'Categories & Folders', path: '/admin/structure', icon: Layers, desc: 'Create and manage vault structure' },
           { label: 'Full Audit Log', path: '/audit', icon: Activity, desc: 'View complete system activity log' },
         ].map(item => (
           <button
@@ -206,21 +197,21 @@ function AdminDashboardContent() {
         </div>
       </div>
 
-      {companyStorage && (
+      {masterfolderStorage && (
         <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] p-5 shadow-sm">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <p className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Company Storage Allocation</p>
+              <p className="text-[12px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">masterfolder Storage Allocation</p>
               <p className="text-[16px] font-semibold text-[var(--text-primary)] mt-1">
-                {companyStorage.company_name}
-                {companyStorage.scoped_to_fy ? ' (selected FY)' : ''}
+                {masterfolderStorage.masterfolder_name}
+                {masterfolderStorage.scoped_to_fy ? ' (selected FY)' : ''}
               </p>
             </div>
             <div className="text-right">
-              <p className="text-[20px] font-bold text-[var(--text-primary)]">{formatBytes(companyStorage.used_bytes)}</p>
+              <p className="text-[20px] font-bold text-[var(--text-primary)]">{formatBytes(masterfolderStorage.used_bytes)}</p>
               <p className="text-[12px] text-[var(--text-secondary)]">
-                {companyStorage.quota_gb > 0
-                  ? `${companyStorage.usage_percent}% of ${companyStorage.quota_gb} GB quota`
+                {masterfolderStorage.quota_gb > 0
+                  ? `${masterfolderStorage.usage_percent}% of ${masterfolderStorage.quota_gb} GB quota`
                   : 'No quota configured'}
               </p>
             </div>
@@ -259,24 +250,24 @@ function AdminDashboardContent() {
         </div>
       )}
 
-      {/* Departments Overview */}
+      {/* Categories Overview */}
       <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[24px] p-6 shadow-sm">
         <div className="flex items-center gap-3 mb-6">
           <Folder size={18} className="text-[var(--text-primary)]" />
-          <h2 className="text-[16px] font-bold text-[var(--text-primary)]">Departments Overview</h2>
-          {companyId && <span className="ml-auto text-[12px] text-[var(--text-tertiary)]">Filtered by selected Company & FY</span>}
+          <h2 className="text-[16px] font-bold text-[var(--text-primary)]">Categories Overview</h2>
+          {masterfolderId && <span className="ml-auto text-[12px] text-[var(--text-tertiary)]">Filtered by selected masterfolder & FY</span>}
         </div>
-        {departments.length === 0 ? (
-          <p className="text-[13px] text-[var(--text-tertiary)] italic">No department data for the selected filter.</p>
+        {categories.length === 0 ? (
+          <p className="text-[13px] text-[var(--text-tertiary)] italic">No category data for the selected filter.</p>
         ) : (
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-            {departments.map((d: any) => (
+            {categories.map((d: any) => (
               <button
-                key={d.department}
-                onClick={() => router.push(`/?${new URLSearchParams({ companyId: companyId||'', fyId: fyId||'', dept: d.department }).toString()}`)}
+                key={d.category}
+                onClick={() => router.push(`/?${new URLSearchParams({ masterfolderId: masterfolderId||'', category: d.category }).toString()}`)}
                 className="bg-[var(--bg-neutral)]/50 rounded-[14px] p-4 border border-[var(--border-subtle)] text-left hover:border-[var(--accent)]/40 hover:shadow-sm transition-all group"
               >
-                <h3 className="font-bold text-[14px] text-[var(--text-primary)] mb-2 group-hover:text-[var(--accent)] transition-colors">{d.department}</h3>
+                <h3 className="font-bold text-[14px] text-[var(--text-primary)] mb-2 group-hover:text-[var(--accent)] transition-colors">{d.category}</h3>
                 <div className="flex justify-between text-[12px] text-[var(--text-secondary)]">
                   <span>{d.total_files} files</span>
                   <span className="font-semibold text-[var(--text-primary)]">{formatBytes(d.total_size)}</span>
@@ -291,8 +282,8 @@ function AdminDashboardContent() {
         <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[24px] overflow-hidden shadow-sm flex flex-col md:col-span-2">
           <div className="p-6 border-b border-[var(--border-subtle)] flex items-center gap-3 bg-[var(--bg-neutral)]/50">
             <Building size={18} className="text-[var(--text-primary)]" />
-            <h2 className="text-[16px] font-bold text-[var(--text-primary)]">Company & FY Overview</h2>
-            <button onClick={() => navTo('/admin/companies')} className="ml-auto text-[12px] text-[var(--accent)] font-semibold hover:underline flex items-center gap-1">
+            <h2 className="text-[16px] font-bold text-[var(--text-primary)]">Masterfolder Overview</h2>
+            <button onClick={() => navTo('/admin/masterfolders')} className="ml-auto text-[12px] text-[var(--accent)] font-semibold hover:underline flex items-center gap-1">
               Manage <ChevronRight size={12} />
             </button>
           </div>
@@ -306,10 +297,10 @@ function AdminDashboardContent() {
                 </tr>
               </thead>
               <tbody className="text-[14px]">
-                {company_fy_overview.length === 0 ? (
+                {masterfolder_fy_overview.length === 0 ? (
                   <tr><td colSpan={3} className="p-6 text-center text-[var(--text-tertiary)] italic">No data available</td></tr>
-                ) : company_fy_overview.map((row: any, i: number) => {
-                  const isSelected = String(row.company_id) === String(companyId) && String(row.fy_id) === String(fyId);
+                ) : masterfolder_fy_overview.map((row: any, i: number) => {
+                  const isSelected = String(row.masterfolder_id) === String(masterfolderId);
                   return (
                     <tr
                       key={i}
@@ -317,8 +308,7 @@ function AdminDashboardContent() {
                     >
                       <td className="px-6 py-4">
                         <div className="flex flex-col">
-                          <span className={`font-bold ${isSelected ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>{row.company_name}</span>
-                          <span className="text-[12px] text-[var(--text-secondary)] font-medium bg-[var(--bg-neutral)] w-fit px-1.5 py-0.5 rounded mt-1">{row.fy_name}</span>
+                          <span className={`font-bold ${isSelected ? 'text-[var(--accent)]' : 'text-[var(--text-primary)]'}`}>{row.masterfolder_name}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -330,13 +320,13 @@ function AdminDashboardContent() {
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button 
-                            onClick={() => router.push(`/admin?companyId=${row.company_id}&fyId=${row.fy_id}`)}
+                            onClick={() => router.push(`/admin?masterfolderId=${row.masterfolder_id}&null=${row.fy_id}`)}
                             className="px-3 py-1.5 rounded-lg bg-[var(--bg-neutral)] text-[12px] font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] transition-all border border-[var(--border-subtle)]"
                           >
                             Filter Admin
                           </button>
                           <button 
-                            onClick={() => router.push(`/?companyId=${row.company_id}&fyId=${row.fy_id}`)}
+                            onClick={() => router.push(`/?masterfolderId=${row.masterfolder_id}&null=${row.fy_id}`)}
                             className="px-3 py-1.5 rounded-lg bg-[var(--accent)] text-white text-[12px] font-bold hover:opacity-90 shadow-sm transition-all"
                           >
                             Go to Vault
@@ -371,7 +361,7 @@ function AdminDashboardContent() {
                   </div>
                   <div>
                     <div className="font-medium text-[14px] text-[var(--text-primary)]">{u.username}</div>
-                    {u.department && <div className="text-[11px] text-[var(--text-tertiary)]">{u.department}</div>}
+                    {u.category && <div className="text-[11px] text-[var(--text-tertiary)]">{u.category}</div>}
                   </div>
                 </div>
                 <span className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase bg-[var(--bg-neutral)] px-2 py-0.5 rounded-md">{u.role}</span>
@@ -386,7 +376,7 @@ function AdminDashboardContent() {
         <div className="p-6 border-b border-[var(--border-subtle)] flex items-center gap-3 bg-[var(--bg-neutral)]/50">
           <Clock size={18} className="text-[var(--text-primary)]" />
           <h2 className="text-[16px] font-bold text-[var(--text-primary)]">Recent Audit Entries</h2>
-          {companyId && <span className="text-[12px] text-[var(--text-tertiary)]">— filtered by selected Company & FY</span>}
+          {masterfolderId && <span className="text-[12px] text-[var(--text-tertiary)]">— filtered by selected masterfolder & FY</span>}
           <button onClick={() => navTo('/audit')} className="ml-auto text-[12px] text-[var(--accent)] font-semibold hover:underline flex items-center gap-1">
             View All <ChevronRight size={12} />
           </button>

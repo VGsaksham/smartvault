@@ -7,7 +7,7 @@ import { apiUrl } from '@/lib/api';
 import { useConfirm } from '@/components/ConfirmProvider';
 
 type FolderNode = { id: number; name: string; parent_folder_id: number | null; children?: FolderNode[] };
-type DepartmentItem = { id: number; name: string; folders: FolderNode[] };
+type CategoryItem = { id: number; name: string; folders: FolderNode[] };
 
 function buildTree(flat: FolderNode[], parentId: number | null = null): FolderNode[] {
   return flat
@@ -224,8 +224,8 @@ function FolderTreeNode({ node, depth, token, busy, onBusy, onMessage, onRefresh
 function AdminStructureContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const companyId = searchParams.get('companyId');
-  const fyId = searchParams.get('fyId');
+  const masterfolderId = searchParams.get('masterfolderId');
+  const dummyNull = searchParams.get('null');
   const confirm = useConfirm();
 
   const [authorized, setAuthorized] = useState(false);
@@ -233,27 +233,34 @@ function AdminStructureContent() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const [departments, setDepartments] = useState<DepartmentItem[]>([]);
-  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
+  const [activeMasterfolderId, setActiveMasterfolderId] = useState<string | null>(null);
 
-  const [newDeptName, setNewDeptName] = useState('');
-  const [editDeptId, setEditDeptId] = useState<number | null>(null);
-  const [editDeptName, setEditDeptName] = useState('');
+  useEffect(() => {
+    let id = searchParams.get('masterfolderId');
+    if (!id) id = localStorage.getItem('last_masterfolderId');
+    if (id) setActiveMasterfolderId(id);
+  }, [searchParams]);
+
+  const [categories, setCategories] = useState<CategoryItem[]>([]);
+  const [selectedCategoryId, setSelectedDeptId] = useState<number | null>(null);
+
+  const [newCategoryName, setNewDeptName] = useState('');
+  const [editCategoryId, setEditDeptId] = useState<number | null>(null);
+  const [editCategoryName, setEditDeptName] = useState('');
 
   const [newFolderName, setNewFolderName] = useState('');
 
   const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
 
-  const normalizedCompanyId = companyId ? Number(companyId) : null;
-  const normalizedFyId = fyId ? Number(fyId) : null;
-  const hasScope = Number.isFinite(normalizedCompanyId) && Number.isFinite(normalizedFyId);
+  const normalizedMasterfolderId = activeMasterfolderId ? Number(activeMasterfolderId) : null;
+  const hasScope = Number.isFinite(normalizedMasterfolderId);
 
   useEffect(() => {
     const t = localStorage.getItem('token');
     if (!t) { router.push('/login'); return; }
     try {
       const payload = JSON.parse(atob(t.split('.')[1]));
-      if (payload.role !== 'Admin') { router.push('/'); return; }
+      if (payload.role !== 'Admin' && !payload.can_manage_structure) { router.push('/'); return; }
       setAuthorized(true);
     } catch { router.push('/login'); }
   }, [router]);
@@ -264,13 +271,13 @@ function AdminStructureContent() {
     setMessage(null);
     try {
       const res = await fetch(
-        apiUrl(`/api/admin/structure?companyId=${normalizedCompanyId}&fyId=${normalizedFyId}`),
+        apiUrl(`/api/admin/structure?masterfolderId=${normalizedMasterfolderId}&null=${null}`),
         { headers: { Authorization: `Bearer ${token}` } }
       );
       const data = await res.json();
       if (!res.ok) throw new Error(data?.error || 'Failed to load structure');
-      const rows: DepartmentItem[] = Array.isArray(data?.departments) ? data.departments : [];
-      setDepartments(rows);
+      const rows: CategoryItem[] = Array.isArray(data?.categories) ? data.categories : [];
+      setCategories(rows);
       if (rows.length > 0) {
         setSelectedDeptId(prev => {
           if (prev && rows.some(d => d.id === prev)) return prev;
@@ -281,12 +288,12 @@ function AdminStructureContent() {
       }
     } catch (e: any) {
       setMessage(e?.message || 'Failed to load structure');
-      setDepartments([]);
+      setCategories([]);
       setSelectedDeptId(null);
     } finally {
       setLoading(false);
     }
-  }, [token, hasScope, normalizedCompanyId, normalizedFyId]);
+  }, [token, hasScope, normalizedMasterfolderId, null]);
 
   useEffect(() => {
     if (!authorized) return;
@@ -294,86 +301,86 @@ function AdminStructureContent() {
     fetchStructure();
   }, [authorized, hasScope, fetchStructure]);
 
-  const selectedDept = useMemo(
-    () => (selectedDeptId ? departments.find(d => d.id === selectedDeptId) || null : null),
-    [departments, selectedDeptId]
+  const selectedCategory = useMemo(
+    () => (selectedCategoryId ? categories.find(d => d.id === selectedCategoryId) || null : null),
+    [categories, selectedCategoryId]
   );
 
-  // Build tree for selected dept
+  // Build tree for selected category
   const folderTree = useMemo(() => {
-    if (!selectedDept) return [];
-    return buildTree(selectedDept.folders || []);
-  }, [selectedDept]);
+    if (!selectedCategory) return [];
+    return buildTree(selectedCategory.folders || []);
+  }, [selectedCategory]);
 
-  const createDepartment = async (e: React.FormEvent) => {
+  const createCategory = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token || !hasScope) return;
-    const name = newDeptName.trim();
+    const name = newCategoryName.trim();
     if (!name) return;
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch(apiUrl('/api/admin/structure/departments'), {
+      const res = await fetch(apiUrl('/api/admin/structure/categories'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ company_id: normalizedCompanyId, fy_id: normalizedFyId, name }),
+        body: JSON.stringify({ masterfolder_id: normalizedMasterfolderId, fy_id: null, name }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Failed to create department');
+      if (!res.ok) throw new Error(data?.error || 'Failed to create category');
       setNewDeptName('');
       await fetchStructure();
-      window.dispatchEvent(new CustomEvent('smartvault:structureChanged', { detail: { companyId: normalizedCompanyId, fyId: normalizedFyId } }));
-      if (data?.department?.id) setSelectedDeptId(Number(data.department.id));
+      window.dispatchEvent(new CustomEvent('smartvault:structureChanged', { detail: { masterfolderId: normalizedMasterfolderId, null: null } }));
+      if (data?.category?.id) setSelectedDeptId(Number(data.category.id));
     } catch (e: any) {
-      setMessage(e?.message || 'Failed to create department');
+      setMessage(e?.message || 'Failed to create category');
     } finally {
       setBusy(false);
     }
   };
 
-  const startEditDept = (d: DepartmentItem) => { setEditDeptId(d.id); setEditDeptName(d.name); };
+  const startEditDept = (d: CategoryItem) => { setEditDeptId(d.id); setEditDeptName(d.name); };
 
   const saveEditDept = async () => {
-    if (!token || !editDeptId) return;
-    const name = editDeptName.trim();
+    if (!token || !editCategoryId) return;
+    const name = editCategoryName.trim();
     if (!name) return;
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch(apiUrl(`/api/admin/structure/departments/${editDeptId}`), {
+      const res = await fetch(apiUrl(`/api/admin/structure/categories/${editCategoryId}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error((data as any)?.error || 'Failed to update department');
+      if (!res.ok) throw new Error((data as any)?.error || 'Failed to update category');
       setEditDeptId(null);
       setEditDeptName('');
       await fetchStructure();
     } catch (e: any) {
-      setMessage(e?.message || 'Failed to update department');
+      setMessage(e?.message || 'Failed to update category');
     } finally {
       setBusy(false);
     }
   };
 
-  const deleteDepartment = async (deptId: number) => {
+  const deleteCategory = async (categoryId: number) => {
     if (!token) return;
-    const ok = await confirm({ title: 'Delete department', message: 'Delete this department? This will fail if files exist in it.', confirmText: 'Delete', destructive: true });
+    const ok = await confirm({ title: 'Delete category', message: 'Delete this category? This will fail if files exist in it.', confirmText: 'Delete', destructive: true });
     if (!ok) return;
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch(apiUrl(`/api/admin/structure/departments/${deptId}`), {
+      const res = await fetch(apiUrl(`/api/admin/structure/categories/${categoryId}`), {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error((data as any)?.error || 'Failed to delete department');
+      if (!res.ok) throw new Error((data as any)?.error || 'Failed to delete category');
       await fetchStructure();
-      window.dispatchEvent(new CustomEvent('smartvault:structureChanged', { detail: { companyId: normalizedCompanyId, fyId: normalizedFyId } }));
+      window.dispatchEvent(new CustomEvent('smartvault:structureChanged', { detail: { masterfolderId: normalizedMasterfolderId, null: null } }));
     } catch (e: any) {
-      setMessage(e?.message || 'Failed to delete department');
+      setMessage(e?.message || 'Failed to delete category');
     } finally {
       setBusy(false);
     }
@@ -381,13 +388,13 @@ function AdminStructureContent() {
 
   const createRootFolder = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !selectedDeptId) return;
+    if (!token || !selectedCategoryId) return;
     const name = newFolderName.trim();
     if (!name) return;
     setBusy(true);
     setMessage(null);
     try {
-      const res = await fetch(apiUrl(`/api/admin/structure/departments/${selectedDeptId}/folders`), {
+      const res = await fetch(apiUrl(`/api/admin/structure/categories/${selectedCategoryId}/folders`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name }),
@@ -396,7 +403,7 @@ function AdminStructureContent() {
       if (!res.ok) throw new Error(data?.error || 'Failed to create folder');
       setNewFolderName('');
       await fetchStructure();
-      window.dispatchEvent(new CustomEvent('smartvault:structureChanged', { detail: { companyId: normalizedCompanyId, fyId: normalizedFyId } }));
+      window.dispatchEvent(new CustomEvent('smartvault:structureChanged', { detail: { masterfolderId: normalizedMasterfolderId, null: null } }));
     } catch (e: any) {
       setMessage(e?.message || 'Failed to create folder');
     } finally {
@@ -412,10 +419,10 @@ function AdminStructureContent() {
         <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] p-5">
           <div className="flex items-center gap-2 text-[var(--text-primary)] font-semibold">
             <Layers size={18} className="text-[var(--accent)]" />
-            Departments &amp; Folders
+            Categories &amp; Folders
           </div>
           <p className="text-[13px] text-[var(--text-secondary)] mt-2">
-            Select a <span className="font-semibold">Company</span> and <span className="font-semibold">FY</span> from the top bar to manage the structure.
+            Select a <span className="font-semibold">masterfolder</span> from the top bar to manage the structure.
           </p>
         </div>
       </div>
@@ -428,7 +435,7 @@ function AdminStructureContent() {
         <div>
           <h1 className="text-[30px] font-bold tracking-tight text-[var(--text-primary)] flex items-center gap-2">
             <Layers size={18} className="text-[var(--accent)]" />
-            Departments &amp; Folders
+            Categories &amp; Folders
           </h1>
           <p className="text-[13px] text-[var(--text-secondary)] mt-1">
             Folders support infinite nesting — click the <Plus size={11} className="inline" /> button inside any folder to add a subfolder.
@@ -449,18 +456,18 @@ function AdminStructureContent() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5">
-        {/* Departments panel */}
+        {/* Categories panel */}
         <div className="bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] p-5">
           <div className="flex items-center justify-between mb-3">
-            <div className="text-[13px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Departments</div>
-            <div className="text-[12px] text-[var(--text-secondary)]">{departments.length}</div>
+            <div className="text-[13px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Categories</div>
+            <div className="text-[12px] text-[var(--text-secondary)]">{categories.length}</div>
           </div>
 
-          <form onSubmit={createDepartment} className="flex items-center gap-2 mb-4">
+          <form onSubmit={createCategory} className="flex items-center gap-2 mb-4">
             <input
-              value={newDeptName}
+              value={newCategoryName}
               onChange={e => setNewDeptName(e.target.value)}
-              placeholder="New department name"
+              placeholder="New category name"
               className="flex-1 px-3 py-2 rounded-[10px] bg-[var(--bg-neutral)] border border-[var(--border-subtle)] text-[14px] text-[var(--text-primary)] outline-none"
               disabled={busy}
             />
@@ -473,12 +480,12 @@ function AdminStructureContent() {
           <div className="space-y-1">
             {loading ? (
               <div className="text-[13px] text-[var(--text-secondary)]">Loading…</div>
-            ) : departments.length === 0 ? (
-              <div className="text-[13px] text-[var(--text-secondary)]">No departments yet for this Company + FY.</div>
+            ) : categories.length === 0 ? (
+              <div className="text-[13px] text-[var(--text-secondary)]">No categories yet for this masterfolder.</div>
             ) : (
-              departments.map(d => {
-                const active = d.id === selectedDeptId;
-                const editing = editDeptId === d.id;
+              categories.map(d => {
+                const active = d.id === selectedCategoryId;
+                const editing = editCategoryId === d.id;
                 return (
                   <div key={d.id}
                     className={`rounded-[12px] border px-3 py-2 ${active ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--border-subtle)] bg-[var(--bg-app)]'}`}>
@@ -504,7 +511,7 @@ function AdminStructureContent() {
                             className="p-2 rounded-[10px] hover:bg-[var(--bg-neutral)] text-[var(--text-secondary)]">
                             <Pencil size={16} />
                           </button>
-                          <button onClick={() => deleteDepartment(d.id)}
+                          <button onClick={() => deleteCategory(d.id)}
                             className="p-2 rounded-[10px] hover:bg-[rgba(255,59,48,0.08)] text-[#ff5b52]">
                             <Trash2 size={16} />
                           </button>
@@ -514,7 +521,7 @@ function AdminStructureContent() {
                     {editing && (
                       <div className="mt-2">
                         <input
-                          value={editDeptName}
+                          value={editCategoryName}
                           onChange={e => setEditDeptName(e.target.value)}
                           className="w-full px-3 py-2 rounded-[10px] bg-[var(--bg-neutral)] border border-[var(--border-subtle)] text-[14px] text-[var(--text-primary)] outline-none"
                           disabled={busy}
@@ -533,12 +540,12 @@ function AdminStructureContent() {
           <div className="flex items-center justify-between mb-3">
             <div className="text-[13px] font-bold text-[var(--text-tertiary)] uppercase tracking-wider">Folder Tree</div>
             <div className="text-[12px] text-[var(--text-secondary)]">
-              {selectedDept ? selectedDept.name : 'Select a department'}
+              {selectedCategory ? selectedCategory.name : 'Select a category'}
             </div>
           </div>
 
-          {!selectedDept ? (
-            <div className="text-[13px] text-[var(--text-secondary)]">Pick a department from the left to manage folders.</div>
+          {!selectedCategory ? (
+            <div className="text-[13px] text-[var(--text-secondary)]">Pick a category from the left to manage folders.</div>
           ) : (
             <>
               {/* Add root folder */}
@@ -546,7 +553,7 @@ function AdminStructureContent() {
                 <input
                   value={newFolderName}
                   onChange={e => setNewFolderName(e.target.value)}
-                  placeholder={`New root folder inside ${selectedDept.name}`}
+                  placeholder={`New root folder inside ${selectedCategory.name}`}
                   className="flex-1 px-3 py-2 rounded-[10px] bg-[var(--bg-neutral)] border border-[var(--border-subtle)] text-[14px] text-[var(--text-primary)] outline-none"
                   disabled={busy}
                 />
@@ -577,7 +584,7 @@ function AdminStructureContent() {
                       onMessage={setMessage}
                       onRefresh={async () => {
                         await fetchStructure();
-                        window.dispatchEvent(new CustomEvent('smartvault:structureChanged', { detail: { companyId: normalizedCompanyId, fyId: normalizedFyId } }));
+                        window.dispatchEvent(new CustomEvent('smartvault:structureChanged', { detail: { masterfolderId: normalizedMasterfolderId, null: null } }));
                       }}
                       confirm={confirm}
                     />

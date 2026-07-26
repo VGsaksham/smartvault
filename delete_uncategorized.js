@@ -9,7 +9,7 @@ const pool = new Pool({
 
 async function run() {
   try {
-    const res = await pool.query("DELETE FROM vault_files WHERE department = 'Uncategorized'");
+    const res = await pool.query("DELETE FROM vault_files WHERE category = 'Uncategorized'");
     console.log('Deleted rows:', res.rowCount);
   } catch (err) {
     console.error(err);

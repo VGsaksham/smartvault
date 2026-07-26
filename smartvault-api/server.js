@@ -17,7 +17,7 @@ const {
 } = require('./src/services/backupService');
 const {
   checkFilePermission,
-  canAccessDepartment,
+  canAccessCategory,
   getEffectiveUserSettings,
   hydrateRequestUser,
 } = require('./src/services/accessService');
@@ -143,16 +143,14 @@ const minioClient = new Minio.Client(env.MINIO);
 const upload = multer({ storage: multer.memoryStorage() });
 
 const authRoutes = require('./src/routes/auth');
-const companyRoutes = require('./src/routes/companies');
-const fyRoutes = require('./src/routes/financialYears');
+const masterfolderRoutes = require('./src/routes/masterfolders');
 const userRoutes = require('./src/routes/users');
 const adminRoutes = require('./src/routes/admin');
 const exportRoutes = require('./src/routes/export');
 const auditRoutes = require('./src/routes/audit');
 
 app.use('/api/auth', authRoutes);
-app.use('/api/companies', companyRoutes);
-app.use('/api/financial-years', fyRoutes);
+app.use('/api/masterfolders', masterfolderRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/export', exportRoutes);
@@ -227,22 +225,22 @@ async function saveUndoPayload(auditLogId, actionType, payload) {
   ).catch(() => {});
 }
 
-function getAllowedDepartmentsForCompany(user, companyId = null) {
-  const rows = Array.isArray(user?.company_access) ? user.company_access : [];
-  const scoped = Number.isFinite(Number(companyId))
-    ? rows.filter((x) => Number(x.company_id) === Number(companyId))
+function getAllowedDepartmentsForMasterfolder(user, masterfolderId = null) {
+  const rows = Array.isArray(user?.masterfolder_access) ? user.masterfolder_access : [];
+  const scoped = Number.isFinite(Number(masterfolderId))
+    ? rows.filter((x) => Number(x.masterfolder_id) === Number(masterfolderId))
     : rows;
   const depts = Array.from(
     new Set(
       scoped
-        .map((x) => String(x?.department || '').trim())
+        .map((x) => String(x?.category || '').trim())
         .filter(Boolean)
     )
   );
   if (depts.length > 0) return depts;
   const fallback = Array.from(
     new Set(
-      [String(user?.department || '').trim(), ...((Array.isArray(user?.allowed_departments) ? user.allowed_departments : []).map((d) => String(d || '').trim()))]
+      [String(user?.category || '').trim(), ...((Array.isArray(user?.allowed_categories) ? user.allowed_categories : []).map((d) => String(d || '').trim()))]
         .filter(Boolean)
     )
   );
@@ -251,41 +249,41 @@ function getAllowedDepartmentsForCompany(user, companyId = null) {
 // ------------------------
 
 function getAllowedCompanyIds(user) {
-  const companyAccess = Array.isArray(user?.company_access) ? user.company_access : [];
+  const companyAccess = Array.isArray(user?.masterfolder_access) ? user.masterfolder_access : [];
   const folderAccess = Array.isArray(user?.folder_access) ? user.folder_access : [];
   const ids = new Set();
   
   for (const x of companyAccess) {
-    if (Number.isFinite(Number(x.company_id))) ids.add(Number(x.company_id));
+    if (Number.isFinite(Number(x.masterfolder_id))) ids.add(Number(x.masterfolder_id));
   }
   for (const x of folderAccess) {
-    if (!x.is_exclusion && Number.isFinite(Number(x.company_id))) ids.add(Number(x.company_id));
+    if (!x.is_exclusion && Number.isFinite(Number(x.masterfolder_id))) ids.add(Number(x.masterfolder_id));
   }
   return Array.from(ids);
 }
 
-function buildFileAccessCondition(user, companyId, startParam) {
+function buildFileAccessCondition(user, masterfolderId, startParam) {
   let values = [];
   let paramCount = startParam;
   
-  const cidFilter = Number.isFinite(Number(companyId)) ? Number(companyId) : null;
-  const companyRows = Array.isArray(user?.company_access) ? user.company_access : [];
+  const cidFilter = Number.isFinite(Number(masterfolderId)) ? Number(masterfolderId) : null;
+  const masterfolderRows = Array.isArray(user?.masterfolder_access) ? user.masterfolder_access : [];
   const folderRows = Array.isArray(user?.folder_access) ? user.folder_access : [];
   
   let fullDepts = new Set();
-  for (const x of companyRows) {
-    const cid = Number(x.company_id);
+  for (const x of masterfolderRows) {
+    const cid = Number(x.masterfolder_id);
     if (cidFilter !== null && cid !== cidFilter) continue;
     if (!Number.isFinite(cid)) continue;
-    const d = String(x?.department || '').trim();
+    const d = String(x?.category || '').trim();
     if (d) fullDepts.add(d);
   }
   
   if (fullDepts.size === 0) {
-    const primaryDept = String(user?.department || '').trim();
+    const primaryDept = String(user?.category || '').trim();
     if (primaryDept) fullDepts.add(primaryDept);
 
-    const legacy = Array.isArray(user?.allowed_departments) ? user.allowed_departments : [];
+    const legacy = Array.isArray(user?.allowed_categories) ? user.allowed_categories : [];
     for (const d of legacy) {
       if (String(d).trim()) fullDepts.add(String(d).trim());
     }
@@ -294,18 +292,18 @@ function buildFileAccessCondition(user, companyId, startParam) {
   let clauses = [];
   
   if (fullDepts.size > 0) {
-    clauses.push(`f.department = ANY($${paramCount++})`);
+    clauses.push(`f.category = ANY($${paramCount++})`);
     values.push(Array.from(fullDepts));
   }
   
   for (const x of folderRows) {
     if (x.is_exclusion) continue;
-    const cid = Number(x.company_id);
+    const cid = Number(x.masterfolder_id);
     if (cidFilter !== null && cid !== cidFilter) continue;
-    const d = String(x?.department || '').trim();
+    const d = String(x?.category || '').trim();
     const folder = String(x?.folder_path || '').trim();
     if (d && folder) {
-      clauses.push(`(f.department = $${paramCount++} AND (f.folder = $${paramCount++} OR f.folder LIKE $${paramCount++}))`);
+      clauses.push(`(f.category = $${paramCount++} AND (f.folder = $${paramCount++} OR f.folder LIKE $${paramCount++}))`);
       values.push(d);
       values.push(folder);
       values.push(folder + '/%');
@@ -325,13 +323,13 @@ function buildFileAccessCondition(user, companyId, startParam) {
 
 
 app.get('/api/files', verifyToken, async (req, res) => {
-  const companyId = req.query.companyId;
+  const masterfolderId = req.query.masterfolderId;
   const fyId = req.query.fyId;
   try {
     await hydrateRequestUser(req);
     let result;
     let query = `
-      SELECT f.*, m.company_id, m.fy_id, ufa.alias_name as user_alias 
+      SELECT f.*, m.masterfolder_id, m.fy_id, ufa.alias_name as user_alias 
       FROM vault_files f 
       LEFT JOIN vault_file_metadata m ON f.id = m.file_id
       LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
@@ -341,23 +339,23 @@ app.get('/api/files', verifyToken, async (req, res) => {
     let paramCount = 2;
 
     if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = getAllowedCompanyIds(req.user);
-      if (allowedCompanyIds.length > 0) {
-        query += ` AND m.company_id = ANY($${paramCount++})`;
-        values.push(allowedCompanyIds);
+      const allowedMasterfolderIds = getAllowedCompanyIds(req.user);
+      if (allowedMasterfolderIds.length > 0) {
+        query += ` AND m.masterfolder_id = ANY($${paramCount++})`;
+        values.push(allowedMasterfolderIds);
       }
-      if (companyId && allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(Number(companyId))) {
+      if (masterfolderId && allowedMasterfolderIds.length > 0 && !allowedMasterfolderIds.includes(Number(masterfolderId))) {
         return res.status(403).json({ error: "You do not have access to this company." });
       }
       
-      const accessRes = buildFileAccessCondition(req.user, companyId, paramCount);
+      const accessRes = buildFileAccessCondition(req.user, masterfolderId, paramCount);
       query += ` AND ${accessRes.sql}`;
       values.push(...accessRes.values);
       paramCount = accessRes.paramCount;
     }
-    if (companyId) {
-      query += ` AND m.company_id = $${paramCount++}`;
-      values.push(companyId);
+    if (masterfolderId) {
+      query += ` AND m.masterfolder_id = $${paramCount++}`;
+      values.push(masterfolderId);
     }
     if (fyId) {
       query += ` AND m.fy_id = $${paramCount++}`;
@@ -374,7 +372,7 @@ app.get('/api/files', verifyToken, async (req, res) => {
 });
 
 app.get('/api/storage/overview', verifyToken, async (req, res) => {
-  const companyId = req.query.companyId ? Number(req.query.companyId) : null;
+  const masterfolderId = req.query.masterfolderId ? Number(req.query.masterfolderId) : null;
   const fyId = req.query.fyId ? Number(req.query.fyId) : null;
   try {
     await hydrateRequestUser(req);
@@ -384,25 +382,25 @@ app.get('/api/storage/overview', verifyToken, async (req, res) => {
     const values = [];
     let i = 1;
 
-    if (Number.isFinite(companyId)) {
-      where += ` AND m.company_id = $${i++}`;
-      values.push(companyId);
+    if (Number.isFinite(masterfolderId)) {
+      where += ` AND m.masterfolder_id = $${i++}`;
+      values.push(masterfolderId);
     }
     if (Number.isFinite(fyId)) {
       where += ` AND m.fy_id = $${i++}`;
       values.push(fyId);
     }
     if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = getAllowedCompanyIds(req.user);
-      if (allowedCompanyIds.length > 0) {
-        if (Number.isFinite(companyId) && !allowedCompanyIds.includes(Number(companyId))) {
+      const allowedMasterfolderIds = getAllowedCompanyIds(req.user);
+      if (allowedMasterfolderIds.length > 0) {
+        if (Number.isFinite(masterfolderId) && !allowedMasterfolderIds.includes(Number(masterfolderId))) {
           return res.status(403).json({ error: "You do not have access to this company." });
         }
-        where += ` AND m.company_id = ANY($${i++})`;
-        values.push(allowedCompanyIds);
+        where += ` AND m.masterfolder_id = ANY($${i++})`;
+        values.push(allowedMasterfolderIds);
       }
       
-      const accessRes = buildFileAccessCondition(req.user, companyId, i);
+      const accessRes = buildFileAccessCondition(req.user, masterfolderId, i);
       where += ` AND ${accessRes.sql}`;
       values.push(...accessRes.values);
       i = accessRes.paramCount;
@@ -417,18 +415,18 @@ app.get('/api/storage/overview', verifyToken, async (req, res) => {
     );
 
     let company_storage = null;
-    if (Number.isFinite(companyId)) {
+    if (Number.isFinite(masterfolderId)) {
       const c = await pool.query(
-        `SELECT id, name, storage_quota_gb FROM companies WHERE id = $1 LIMIT 1`,
-        [companyId]
+        `SELECT id, name, storage_quota_gb FROM masterfolders WHERE id = $1 LIMIT 1`,
+        [masterfolderId]
       );
       if (c.rows.length > 0) {
         const usedBytes = Number(scopeResult.rows[0]?.total_size || 0);
         const quotaGb = Number(c.rows[0].storage_quota_gb || 0);
         const quotaBytes = quotaGb > 0 ? quotaGb * 1024 * 1024 * 1024 : 0;
         company_storage = {
-          company_id: Number(c.rows[0].id),
-          company_name: c.rows[0].name,
+          masterfolder_id: Number(c.rows[0].id),
+          masterfolder_name: c.rows[0].name,
           quota_gb: quotaGb,
           used_bytes: usedBytes,
           usage_percent: quotaBytes > 0 ? Number(((usedBytes / quotaBytes) * 100).toFixed(1)) : null,
@@ -450,23 +448,23 @@ app.get('/api/storage/overview', verifyToken, async (req, res) => {
   }
 });
 
-async function ensureFolderExists(companyId, fyId, departmentName, folderPath) {
+async function ensureFolderExists(masterfolderId, fyId, categoryName, folderPath) {
   if (!folderPath || folderPath === 'null' || folderPath === 'undefined') return;
   const parts = folderPath.split('/').map(p => p.trim()).filter(Boolean);
   if (parts.length === 0) return;
 
-  // 1. Ensure department exists (usually does, but safe to verify/create)
+  // 1. Ensure category exists (usually does, but safe to verify/create)
   let deptId;
   const deptRes = await pool.query(
-    'SELECT id FROM company_departments WHERE company_id = $1 AND fy_id = $2 AND LOWER(name) = LOWER($3)',
-    [companyId, fyId, departmentName]
+    'SELECT id FROM masterfolder_categories WHERE masterfolder_id = $1 AND LOWER(name) = LOWER($2)',
+    [masterfolderId, categoryName]
   );
   if (deptRes.rows.length > 0) {
     deptId = deptRes.rows[0].id;
   } else {
     const insertDept = await pool.query(
-      'INSERT INTO company_departments (company_id, fy_id, name) VALUES ($1, $2, $3) RETURNING id',
-      [companyId, fyId, departmentName]
+      'INSERT INTO masterfolder_categories (masterfolder_id, name) VALUES ($1, $2) RETURNING id',
+      [masterfolderId, categoryName]
     );
     deptId = insertDept.rows[0].id;
   }
@@ -476,10 +474,10 @@ async function ensureFolderExists(companyId, fyId, departmentName, folderPath) {
   for (const part of parts) {
     let query, params;
     if (parentId === null) {
-      query = 'SELECT id FROM company_department_folders WHERE department_id = $1 AND parent_folder_id IS NULL AND LOWER(name) = LOWER($2)';
+      query = 'SELECT id FROM masterfolder_category_folders WHERE category_id = $1 AND parent_folder_id IS NULL AND LOWER(name) = LOWER($2)';
       params = [deptId, part];
     } else {
-      query = 'SELECT id FROM company_department_folders WHERE department_id = $1 AND parent_folder_id = $2 AND LOWER(name) = LOWER($3)';
+      query = 'SELECT id FROM masterfolder_category_folders WHERE category_id = $1 AND parent_folder_id = $2 AND LOWER(name) = LOWER($3)';
       params = [deptId, parentId, part];
     }
     const folderRes = await pool.query(query, params);
@@ -487,7 +485,7 @@ async function ensureFolderExists(companyId, fyId, departmentName, folderPath) {
       parentId = folderRes.rows[0].id;
     } else {
       const insertFolder = await pool.query(
-        'INSERT INTO company_department_folders (department_id, parent_folder_id, name) VALUES ($1, $2, $3) RETURNING id',
+        'INSERT INTO masterfolder_category_folders (category_id, parent_folder_id, name) VALUES ($1, $2, $3) RETURNING id',
         [deptId, parentId, part]
       );
       parentId = insertFolder.rows[0].id;
@@ -495,17 +493,65 @@ async function ensureFolderExists(companyId, fyId, departmentName, folderPath) {
   }
 }
 
+
+
+async function ensureFolderHierarchy(pool, masterfolderId, category, parts) {
+  let parentId = null;
+  for (let i = 0; i < parts.length; i++) {
+    const pName = parts[i];
+    const checkFolder = await pool.query(
+      `SELECT f.id FROM masterfolder_category_folders f
+       JOIN masterfolder_categories d ON d.id = f.category_id
+       WHERE d.masterfolder_id = $1 AND d.name = $2 AND f.name = $3 AND ${parentId ? 'f.parent_folder_id = $4' : 'f.parent_folder_id IS NULL'} LIMIT 1`,
+      parentId ? [masterfolderId, category, pName, parentId] : [masterfolderId, category, pName]
+    );
+    if (checkFolder.rows.length > 0) {
+      parentId = checkFolder.rows[0].id;
+    } else {
+      const deptRes = await pool.query(`SELECT id FROM masterfolder_categories WHERE masterfolder_id = $1 AND name = $2 LIMIT 1`, [masterfolderId, category]);
+      if (deptRes.rows.length === 0) throw new Error("Category not found for folder creation");
+      const deptId = deptRes.rows[0].id;
+      const insertFolder = await pool.query(
+        `INSERT INTO masterfolder_category_folders (category_id, parent_folder_id, name) VALUES ($1, $2, $3) RETURNING id`,
+        [deptId, parentId, pName]
+      );
+      parentId = insertFolder.rows[0].id;
+    }
+  }
+  return parentId;
+}
+
+app.post('/api/folders/ensure', verifyToken, express.json(), async (req, res) => {
+  const { masterfolderId, category, folders } = req.body;
+  if (!category || !folders || !Array.isArray(folders)) {
+    return res.status(400).json({ error: "Missing required fields" });
+  }
+
+  try {
+    for (const folder of folders) {
+      if (!folder) continue;
+      const parts = folder.split('/').filter(Boolean);
+      await ensureFolderHierarchy(pool, masterfolderId, category, parts);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error ensuring folders:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.post('/api/upload', verifyToken, upload.single('document'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   
-  const department = req.body.department;
-  if (!department) return res.status(400).json({ error: "Department is required" });
+  const category = req.body.category;
+  if (!category) return res.status(400).json({ error: "Category is required" });
   const folder = req.body.folder || null;
-  const companyId = req.body.companyId;
-  const fyId = req.body.fyId;
+  const masterfolderId = req.body.masterfolderId;
+  let fyId = req.body.fyId;
+  if (fyId === 'null' || fyId === 'undefined' || fyId === '') fyId = null;
 
-  if (!companyId || !fyId) {
-    return res.status(400).json({ error: "Company ID and Financial Year ID are required for upload." });
+  if (!masterfolderId) {
+    return res.status(400).json({ error: "Masterfolder ID is required for upload." });
   }
 
   // Phase 3.3: Check if the Financial Year is Archived or Locked
@@ -527,20 +573,20 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
     return res.status(403).json({ error: "Guests cannot upload files." });
   }
   if (req.user.role !== 'Admin') {
-    const companyRows = Array.isArray(req.user.company_access) ? req.user.company_access : [];
-    const forCompany = companyRows.filter((x) => Number(x.company_id) === Number(companyId));
+    const masterfolderRows = Array.isArray(req.user.masterfolder_access) ? req.user.masterfolder_access : [];
+    const forCompany = masterfolderRows.filter((x) => Number(x.masterfolder_id) === Number(masterfolderId));
     if (forCompany.length > 0) {
-      const deptRow = forCompany.find((x) => String(x.department) === String(department));
+      const deptRow = forCompany.find((x) => String(x.category) === String(category));
       if (!deptRow) {
-        return res.status(403).json({ error: "You do not have department access in this company." });
+        return res.status(403).json({ error: "You do not have category access in this company." });
       }
       if (!Boolean(deptRow.can_upload)) {
-        return res.status(403).json({ error: "You only have read-only access in this company department." });
+        return res.status(403).json({ error: "You only have read-only access in this company category." });
       }
     }
-    const deptScope = getAllowedDepartmentsForCompany(req.user, Number(companyId));
-    if (!deptScope.includes(String(department))) {
-      return res.status(403).json({ error: "You do not have access to this department in the selected company." });
+    const deptScope = getAllowedDepartmentsForMasterfolder(req.user, Number(masterfolderId));
+    if (!deptScope.includes(String(category))) {
+      return res.status(403).json({ error: "You do not have access to this category in the selected company." });
     }
   }
 
@@ -556,7 +602,7 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
     const customName = req.body.customName || null;
 
     // Construct hierarchical MinIO filename
-    const coRes = await pool.query('SELECT name FROM companies WHERE id = $1', [companyId]);
+    const coRes = await pool.query('SELECT name FROM masterfolders WHERE id = $1', [masterfolderId]);
     const fyRes = await pool.query('SELECT name FROM financial_years WHERE id = $1', [fyId]);
     const coName = coRes.rows[0]?.name || 'UnknownCompany';
     const fyName = fyRes.rows[0]?.name || 'UnknownFY';
@@ -564,7 +610,7 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
     const sanitize = (str) => String(str).replace(/[^a-zA-Z0-9.\-_]/g, '_');
     const sCo = sanitize(coName);
     const sFy = sanitize(fyName);
-    const sDept = sanitize(department);
+    const sDept = sanitize(category);
     const sFolder = folder ? folder.split('/').map(sanitize).join('/') : '';
     
     const minioPath = [sCo, sFy, sDept, sFolder, fileName].filter(Boolean).join('/');
@@ -591,36 +637,36 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
     const yearMonth = `${year}-${month}`;
     
     const seqQuery = `
-      INSERT INTO file_sequences (department, year_month, last_sequence)
+      INSERT INTO file_sequences (category, year_month, last_sequence)
       VALUES ($1, $2, 1)
-      ON CONFLICT (department, year_month) 
+      ON CONFLICT (category, year_month) 
       DO UPDATE SET last_sequence = file_sequences.last_sequence + 1
       RETURNING last_sequence;
     `;
-    const seqRes = await pool.query(seqQuery, [department, yearMonth]);
+    const seqRes = await pool.query(seqQuery, [category, yearMonth]);
     const seq = seqRes.rows[0].last_sequence;
     
     const codes = { 'Finance': 'FIN', 'HR': 'HR', 'Legal': 'LEG', 'Media': 'MED', 'Admin': 'ADM' };
-    const deptCode = codes[department] || 'UNC';
+    const deptCode = codes[category] || 'UNC';
     const autoName = `${deptCode}-${year}-${month}-${String(seq).padStart(4, '0')}-${customTag}`;
 
     // Auto-create folder structure in database if needed
     if (folder) {
-      await ensureFolderExists(companyId, fyId, department, folder);
+      await ensureFolderExists(masterfolderId, fyId, category, folder);
     }
 
     // Insert with new columns
-    const insertQuery = `INSERT INTO vault_files (original_name, minio_filename, size_bytes, mime_type, department, folder, file_hash, uploaded_by, auto_name, custom_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`;
-    const dbResult = await pool.query(insertQuery, [req.file.originalname, storageFilename, req.file.size, req.file.mimetype, department, folder, fileHash, req.user.id, autoName, customName]);
+    const insertQuery = `INSERT INTO vault_files (original_name, minio_filename, size_bytes, mime_type, category, folder, file_hash, uploaded_by, auto_name, custom_name) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`;
+    const dbResult = await pool.query(insertQuery, [req.file.originalname, storageFilename, req.file.size, req.file.mimetype, category, folder, fileHash, req.user.id, autoName, customName]);
     const uploadedFile = dbResult.rows[0];
 
     // Insert metadata
-    await pool.query(`INSERT INTO vault_file_metadata (file_id, company_id, fy_id) VALUES ($1, $2, $3)`, [uploadedFile.id, companyId, fyId]);
+    await pool.query(`INSERT INTO vault_file_metadata (file_id, masterfolder_id, fy_id) VALUES ($1, $2, $3)`, [uploadedFile.id, masterfolderId, fyId]);
 
     // Log the upload action
-    await logAction(req.user.id, 'UPLOAD', uploadedFile.id, `Uploaded ${uploadedFile.original_name} to ${department}`, req.ip);
+    await logAction(req.user.id, 'UPLOAD', uploadedFile.id, `Uploaded ${uploadedFile.original_name} to ${category}`, req.ip);
 
-    res.json({ success: true, message: `File vaulted in ${department}!`, file: uploadedFile });
+    res.json({ success: true, message: `File vaulted in ${category}!`, file: uploadedFile });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Failed to process upload" });
@@ -634,10 +680,10 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
 app.get('/api/public/files/:id', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT f.*, c.name as company_name, fy.name as fy_name
+      SELECT f.*, c.name as masterfolder_name, fy.name as fy_name
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON f.id = m.file_id
-      LEFT JOIN companies c ON m.company_id = c.id
+      LEFT JOIN masterfolders c ON m.masterfolder_id = c.id
       LEFT JOIN financial_years fy ON m.fy_id = fy.id
       WHERE f.id = $1
     `, [req.params.id]);
@@ -652,15 +698,15 @@ app.get('/api/public/files/:id', async (req, res) => {
 app.get('/api/public/folder', async (req, res) => {
   try {
     const { dept, folder } = req.query;
-    if (!dept) return res.status(400).json({ error: 'Department is required' });
+    if (!dept) return res.status(400).json({ error: 'Category is required' });
     
     let query = `
-      SELECT f.id, f.original_name, f.size_bytes, f.upload_date, f.folder, c.name as company_name, fy.name as fy_name
+      SELECT f.id, f.original_name, f.size_bytes, f.upload_date, f.folder, c.name as masterfolder_name, fy.name as fy_name
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON f.id = m.file_id
-      LEFT JOIN companies c ON m.company_id = c.id
+      LEFT JOIN masterfolders c ON m.masterfolder_id = c.id
       LEFT JOIN financial_years fy ON m.fy_id = fy.id
-      WHERE f.department = $1
+      WHERE f.category = $1
     `;
     const params = [dept];
     if (folder && folder !== 'null') {
@@ -671,7 +717,7 @@ app.get('/api/public/folder', async (req, res) => {
     }
     
     const result = await pool.query(query, params);
-    res.json({ department: dept, folder: folder || 'Root', files: result.rows });
+    res.json({ category: dept, folder: folder || 'Root', files: result.rows });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -681,15 +727,15 @@ app.get('/api/public/folder', async (req, res) => {
 app.get('/api/files/starred', verifyToken, async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT f.*, m.company_id, m.fy_id, true as starred, ufa.alias_name as user_alias
+      SELECT f.*, m.masterfolder_id, m.fy_id, true as starred, ufa.alias_name as user_alias
       FROM vault_files f
       JOIN starred_files s ON s.file_id = f.id
       LEFT JOIN vault_file_metadata m ON m.file_id = f.id
       LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
       WHERE s.user_id = $1
-      ${req.user.role !== 'Admin' ? 'AND f.department = $2' : ''}
+      ${req.user.role !== 'Admin' ? 'AND f.category = $2' : ''}
       ORDER BY s.created_at DESC
-    `, req.user.role !== 'Admin' ? [req.user.id, req.user.department] : [req.user.id]);
+    `, req.user.role !== 'Admin' ? [req.user.id, req.user.category] : [req.user.id]);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -697,21 +743,69 @@ app.get('/api/files/starred', verifyToken, async (req, res) => {
   }
 });
 
+// GET Starred folders for current user
+app.get('/api/folders/starred', verifyToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      WITH RECURSIVE folder_path AS (
+        SELECT id, category_id, parent_folder_id, name, name::text as full_path
+        FROM masterfolder_category_folders
+        WHERE parent_folder_id IS NULL
+        
+        UNION ALL
+        
+        SELECT f.id, f.category_id, f.parent_folder_id, f.name, (p.full_path || '/' || f.name) as full_path
+        FROM masterfolder_category_folders f
+        INNER JOIN folder_path p ON f.parent_folder_id = p.id
+      )
+      SELECT fp.id, fp.category_id, fp.full_path as path, c.name as category_name, c.masterfolder_id, true as starred
+      FROM folder_path fp
+      JOIN starred_folders s ON s.folder_id = fp.id
+      JOIN masterfolder_categories c ON c.id = fp.category_id
+      WHERE s.user_id = $1
+      ${req.user.role !== 'Admin' ? 'AND c.name = $2' : ''}
+      ORDER BY s.created_at DESC
+    `, req.user.role !== 'Admin' ? [req.user.id, req.user.category] : [req.user.id]);
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch starred folders" });
+  }
+});
+
+// TOGGLE Star on a folder (per user)
+app.post('/api/folders/:id/star', verifyToken, async (req, res) => {
+  const folderId = req.params.id;
+  const userId = req.user.id;
+  try {
+    const existing = await pool.query('SELECT id FROM starred_folders WHERE user_id=$1 AND folder_id=$2', [userId, folderId]);
+    if (existing.rows.length > 0) {
+      await pool.query('DELETE FROM starred_folders WHERE user_id=$1 AND folder_id=$2', [userId, folderId]);
+      res.json({ starred: false });
+    } else {
+      await pool.query('INSERT INTO starred_folders (user_id, folder_id) VALUES ($1, $2)', [userId, folderId]);
+      res.json({ starred: true });
+    }
+  } catch (err) {
+    res.status(500).json({ error: "Failed to toggle folder star" });
+  }
+});
+
 // GET Recent files (last 30, scoped by user)
 app.get('/api/files/recent', verifyToken, async (req, res) => {
-  const { companyId, fyId } = req.query;
+  const { masterfolderId, fyId } = req.query;
   try {
-    const normalizedCompanyId = companyId ? Number(companyId) : null;
+    const normalizedCompanyId = masterfolderId ? Number(masterfolderId) : null;
     const normalizedFyId = fyId ? Number(fyId) : null;
-    if (companyId && Number.isNaN(normalizedCompanyId)) {
-      return res.status(400).json({ error: "Invalid companyId" });
+    if (masterfolderId && Number.isNaN(normalizedCompanyId)) {
+      return res.status(400).json({ error: "Invalid masterfolderId" });
     }
     if (fyId && Number.isNaN(normalizedFyId)) {
       return res.status(400).json({ error: "Invalid fyId" });
     }
     if (normalizedCompanyId && normalizedFyId) {
       const fyMatch = await pool.query(
-        'SELECT id FROM financial_years WHERE id = $1 AND company_id = $2 LIMIT 1',
+        'SELECT id FROM financial_years WHERE id = $1 AND masterfolder_id = $2 LIMIT 1',
         [normalizedFyId, normalizedCompanyId]
       );
       if (fyMatch.rows.length === 0) {
@@ -720,7 +814,7 @@ app.get('/api/files/recent', verifyToken, async (req, res) => {
     }
 
     let query = `
-      SELECT f.*, m.company_id, m.fy_id, ufa.alias_name as user_alias
+      SELECT f.*, m.masterfolder_id, m.fy_id, ufa.alias_name as user_alias
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON m.file_id = f.id
       LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
@@ -729,29 +823,29 @@ app.get('/api/files/recent', verifyToken, async (req, res) => {
     const values = [req.user.id];
     let p = 2;
     if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = Array.from(
+      const allowedMasterfolderIds = Array.from(
         new Set(
-          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
-            .map((x) => Number(x.company_id))
+          (Array.isArray(req.user.masterfolder_access) ? req.user.masterfolder_access : [])
+            .map((x) => Number(x.masterfolder_id))
             .filter((x) => Number.isFinite(x))
         )
       );
-      if (allowedCompanyIds.length > 0) {
-        query += ` AND m.company_id = ANY($${p++})`;
-        values.push(allowedCompanyIds);
+      if (allowedMasterfolderIds.length > 0) {
+        query += ` AND m.masterfolder_id = ANY($${p++})`;
+        values.push(allowedMasterfolderIds);
       }
-      if (normalizedCompanyId && allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(normalizedCompanyId)) {
+      if (normalizedCompanyId && allowedMasterfolderIds.length > 0 && !allowedMasterfolderIds.includes(normalizedCompanyId)) {
         return res.status(403).json({ error: "You do not have access to this company." });
       }
-      const deptScope = getAllowedDepartmentsForCompany(req.user, normalizedCompanyId);
+      const deptScope = getAllowedDepartmentsForMasterfolder(req.user, normalizedCompanyId);
       if (deptScope.length > 0) {
-        query += ` AND f.department = ANY($${p++})`;
+        query += ` AND f.category = ANY($${p++})`;
         values.push(deptScope);
       } else {
         query += ` AND 1=0`;
       }
     }
-    if (normalizedCompanyId) { query += ` AND m.company_id = $${p++}`; values.push(normalizedCompanyId); }
+    if (normalizedCompanyId) { query += ` AND m.masterfolder_id = $${p++}`; values.push(normalizedCompanyId); }
     if (normalizedFyId) { query += ` AND m.fy_id = $${p++}`; values.push(normalizedFyId); }
     query += ` ORDER BY f.upload_date DESC LIMIT 30`;
     const result = await pool.query(query, values);
@@ -766,7 +860,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
   const {
     q,
     scope,
-    companyId,
+    masterfolderId,
     fyId,
     folder,
     exact,
@@ -776,8 +870,8 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
     year,
     month,
     day,
-    departments,
-    companies,
+    categories,
+    masterfolders,
     financialYears,
     fileType,
     extension,
@@ -789,11 +883,11 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
   if (!q) return res.json([]);
   try {
     await hydrateRequestUser(req);
-    const normalizedCompanyId = companyId ? Number(companyId) : null;
+    const normalizedCompanyId = masterfolderId ? Number(masterfolderId) : null;
     const normalizedFyId = fyId ? Number(fyId) : null;
 
-    if (companyId && Number.isNaN(normalizedCompanyId)) {
-      return res.status(400).json({ error: "Invalid companyId" });
+    if (masterfolderId && Number.isNaN(normalizedCompanyId)) {
+      return res.status(400).json({ error: "Invalid masterfolderId" });
     }
     if (fyId && Number.isNaN(normalizedFyId)) {
       return res.status(400).json({ error: "Invalid fyId" });
@@ -802,7 +896,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
     // Security guard: if both are provided, FY must belong to the selected company.
     if (normalizedCompanyId && normalizedFyId) {
       const fyMatch = await pool.query(
-        'SELECT id FROM financial_years WHERE id = $1 AND company_id = $2 LIMIT 1',
+        'SELECT id FROM financial_years WHERE id = $1 AND masterfolder_id = $2 LIMIT 1',
         [normalizedFyId, normalizedCompanyId]
       );
       if (fyMatch.rows.length === 0) {
@@ -811,14 +905,14 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
     }
 
     let query = `
-      SELECT f.*, m.company_id, m.fy_id,
-             c.name as company_name,
+      SELECT f.*, m.masterfolder_id, m.fy_id,
+             c.name as masterfolder_name,
              u.username as uploaded_by_name,
              fy.name as fy_name, fy.status as fy_status,
              ufa.alias_name as user_alias
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON m.file_id = f.id
-      LEFT JOIN companies c ON c.id = m.company_id
+      LEFT JOIN masterfolders c ON c.id = m.masterfolder_id
       LEFT JOIN financial_years fy ON fy.id = m.fy_id
       LEFT JOIN users u ON u.id = f.uploaded_by
       LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
@@ -845,23 +939,23 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
     }
 
     if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = Array.from(
+      const allowedMasterfolderIds = Array.from(
         new Set(
-          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
-            .map((x) => Number(x.company_id))
+          (Array.isArray(req.user.masterfolder_access) ? req.user.masterfolder_access : [])
+            .map((x) => Number(x.masterfolder_id))
             .filter((x) => Number.isFinite(x))
         )
       );
-      if (allowedCompanyIds.length > 0) {
-        query += ` AND m.company_id = ANY($${p++})`;
-        values.push(allowedCompanyIds);
+      if (allowedMasterfolderIds.length > 0) {
+        query += ` AND m.masterfolder_id = ANY($${p++})`;
+        values.push(allowedMasterfolderIds);
       }
-      if (normalizedCompanyId && allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(normalizedCompanyId)) {
+      if (normalizedCompanyId && allowedMasterfolderIds.length > 0 && !allowedMasterfolderIds.includes(normalizedCompanyId)) {
         return res.status(403).json({ error: "You do not have access to this company." });
       }
-      const deptScope = getAllowedDepartmentsForCompany(req.user, normalizedCompanyId);
+      const deptScope = getAllowedDepartmentsForMasterfolder(req.user, normalizedCompanyId);
       if (deptScope.length > 0) {
-        query += ` AND f.department = ANY($${p++})`;
+        query += ` AND f.category = ANY($${p++})`;
         values.push(deptScope);
       } else {
         query += ` AND 1=0`;
@@ -875,14 +969,14 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
       return res.json([]);
     }
 
-    if (scope === 'fy' && companyId && fyId) {
-      query += ` AND m.company_id = $${p++} AND m.fy_id = $${p++}`;
-      values.push(companyId, fyId);
+    if (scope === 'fy' && masterfolderId && fyId) {
+      query += ` AND m.masterfolder_id = $${p++} AND m.fy_id = $${p++}`;
+      values.push(masterfolderId, fyId);
       companyFilterApplied = true;
       fyFilterApplied = true;
-    } else if (scope === 'company' && companyId) {
-      query += ` AND m.company_id = $${p++}`;
-      values.push(companyId);
+    } else if (scope === 'company' && masterfolderId) {
+      query += ` AND m.masterfolder_id = $${p++}`;
+      values.push(masterfolderId);
       companyFilterApplied = true;
     } else if (scope === 'folder' && folder) {
       query += ` AND (f.folder = $${p++} OR f.folder ILIKE $${p++})`;
@@ -892,7 +986,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
     // Always enforce selected company/FY context when provided by client,
     // even when scope is "all", so navbar selectors are respected.
     if (normalizedCompanyId && !companyFilterApplied) {
-      query += ` AND m.company_id = $${p++}`;
+      query += ` AND m.masterfolder_id = $${p++}`;
       values.push(normalizedCompanyId);
     }
     if (normalizedFyId && !fyFilterApplied) {
@@ -906,9 +1000,9 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
     if (month) { query += ` AND EXTRACT(MONTH FROM f.upload_date) = $${p++}`; values.push(Number(month)); }
     if (day) { query += ` AND EXTRACT(DAY FROM f.upload_date) = $${p++}`; values.push(Number(day)); }
 
-    const deptValues = parseCsv(departments);
-    if (deptValues.length > 0) { query += ` AND f.department = ANY($${p++})`; values.push(deptValues); }
-    const companyValues = parseCsv(companies);
+    const deptValues = parseCsv(categories);
+    if (deptValues.length > 0) { query += ` AND f.category = ANY($${p++})`; values.push(deptValues); }
+    const companyValues = parseCsv(masterfolders);
     if (companyValues.length > 0) { query += ` AND c.name = ANY($${p++})`; values.push(companyValues); }
     const fyValues = parseCsv(financialYears);
     if (fyValues.length > 0) { query += ` AND fy.name = ANY($${p++})`; values.push(fyValues); }
@@ -965,10 +1059,10 @@ app.get('/api/files/:id', verifyToken, async (req, res) => {
   try {
     await hydrateRequestUser(req);
     const result = await pool.query(`
-      SELECT f.*, c.name as company_name, fy.name as fy_name
+      SELECT f.*, c.name as masterfolder_name, fy.name as fy_name
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON f.id = m.file_id
-      LEFT JOIN companies c ON m.company_id = c.id
+      LEFT JOIN masterfolders c ON m.masterfolder_id = c.id
       LEFT JOIN financial_years fy ON m.fy_id = fy.id
       WHERE f.id = $1
     `, [req.params.id]);
@@ -976,7 +1070,7 @@ app.get('/api/files/:id', verifyToken, async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'File not found' });
     const file = result.rows[0];
     
-    if (!canAccessDepartment(req.user, file.department)) {
+    if (!canAccessCategory(req.user, file.category)) {
       return res.status(403).json({ error: 'Access Denied.' });
     }
     
@@ -1007,29 +1101,29 @@ app.post('/api/files/:id/star', verifyToken, async (req, res) => {
 app.get('/api/search/options', verifyToken, async (req, res) => {
   try {
     await hydrateRequestUser(req);
-    const normalizedCompanyId = req.query.companyId ? Number(req.query.companyId) : null;
+    const normalizedCompanyId = req.query.masterfolderId ? Number(req.query.masterfolderId) : null;
     const normalizedFyId = req.query.fyId ? Number(req.query.fyId) : null;
     const hasScope = Number.isFinite(normalizedCompanyId) && Number.isFinite(normalizedFyId);
     const values = [];
     let accessClause = '';
     if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = Array.from(
+      const allowedMasterfolderIds = Array.from(
         new Set(
-          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
-            .map((x) => Number(x.company_id))
+          (Array.isArray(req.user.masterfolder_access) ? req.user.masterfolder_access : [])
+            .map((x) => Number(x.masterfolder_id))
             .filter((x) => Number.isFinite(x))
         )
       );
-      if (allowedCompanyIds.length > 0) {
-        accessClause = `WHERE m.company_id = ANY($${values.length + 1})`;
-        values.push(allowedCompanyIds);
+      if (allowedMasterfolderIds.length > 0) {
+        accessClause = `WHERE m.masterfolder_id = ANY($${values.length + 1})`;
+        values.push(allowedMasterfolderIds);
       }
-      if (normalizedCompanyId && allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(normalizedCompanyId)) {
+      if (normalizedCompanyId && allowedMasterfolderIds.length > 0 && !allowedMasterfolderIds.includes(normalizedCompanyId)) {
         return res.status(403).json({ error: "You do not have access to this company." });
       }
-      const deptScope = getAllowedDepartmentsForCompany(req.user, normalizedCompanyId);
+      const deptScope = getAllowedDepartmentsForMasterfolder(req.user, normalizedCompanyId);
       if (deptScope.length > 0) {
-        accessClause = `${accessClause ? `${accessClause} AND` : 'WHERE'} f.department = ANY($${values.length + 1})`;
+        accessClause = `${accessClause ? `${accessClause} AND` : 'WHERE'} f.category = ANY($${values.length + 1})`;
         values.push(deptScope);
       } else {
         accessClause = `${accessClause ? `${accessClause} AND` : 'WHERE'} 1=0`;
@@ -1039,14 +1133,14 @@ app.get('/api/search/options', verifyToken, async (req, res) => {
     const result = await pool.query(
       `
       SELECT
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT f.department), NULL) AS departments,
-        ARRAY_REMOVE(ARRAY_AGG(DISTINCT c.name), NULL) AS company_names,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT f.category), NULL) AS categories,
+        ARRAY_REMOVE(ARRAY_AGG(DISTINCT c.name), NULL) AS masterfolder_names,
         ARRAY_REMOVE(ARRAY_AGG(DISTINCT fy.name), NULL) AS fy_names,
         ARRAY_REMOVE(ARRAY_AGG(DISTINCT u.username), NULL) AS uploaded_by_names,
         ARRAY_REMOVE(ARRAY_AGG(DISTINCT CASE WHEN f.minio_filename LIKE 'local:%' THEN 'External HDD' ELSE 'MinIO' END), NULL) AS hdd_locations
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON m.file_id = f.id
-      LEFT JOIN companies c ON c.id = m.company_id
+      LEFT JOIN masterfolders c ON c.id = m.masterfolder_id
       LEFT JOIN financial_years fy ON fy.id = m.fy_id
       LEFT JOIN users u ON u.id = f.uploaded_by
       ${accessClause}
@@ -1064,16 +1158,16 @@ app.get('/api/search/options', verifyToken, async (req, res) => {
       values
     ).catch(() => ({ rows: [] }));
 
-    // If companyId+fyId are provided, prefer managed departments even if they have no files yet.
+    // If masterfolderId+fyId are provided, prefer managed categories even if they have no files yet.
     let managedDepartments = null;
     if (hasScope) {
       try {
         const managed = await pool.query(
           `SELECT name
-           FROM company_departments
-           WHERE company_id = $1 AND fy_id = $2
+           FROM masterfolder_categories
+           WHERE masterfolder_id = $1
            ORDER BY LOWER(name) ASC`,
-          [normalizedCompanyId, normalizedFyId]
+          [normalizedCompanyId]
         );
         managedDepartments = managed.rows.map((r) => r.name).filter(Boolean);
       } catch {
@@ -1083,17 +1177,17 @@ app.get('/api/search/options', verifyToken, async (req, res) => {
 
     const rawDepartments = managedDepartments && managedDepartments.length > 0
       ? managedDepartments
-      : (result.rows[0]?.departments || []);
+      : (result.rows[0]?.categories || []);
 
-    // Apply user access filtering even when using managed departments.
-    const departments =
+    // Apply user access filtering even when using managed categories.
+    const categories =
       req.user.role === 'Admin'
         ? rawDepartments
-        : rawDepartments.filter((d) => getAllowedDepartmentsForCompany(req.user, normalizedCompanyId).includes(d));
+        : rawDepartments.filter((d) => getAllowedDepartmentsForMasterfolder(req.user, normalizedCompanyId).includes(d));
 
     res.json({
-      departments,
-      companies: result.rows[0]?.company_names || [],
+      categories,
+      masterfolders: result.rows[0]?.masterfolder_names || [],
       financialYears: result.rows[0]?.fy_names || [],
       uploadedBy: result.rows[0]?.uploaded_by_names || [],
       hddLocations: result.rows[0]?.hdd_locations || [],
@@ -1105,56 +1199,56 @@ app.get('/api/search/options', verifyToken, async (req, res) => {
   }
 });
 
-// Company + FY structure (Departments + Folders)
+// Company + FY structure (Categories + Folders)
 app.get('/api/structure', verifyToken, async (req, res) => {
   try {
     await hydrateRequestUser(req);
-    const companyId = req.query.companyId ? Number(req.query.companyId) : null;
+    const masterfolderId = req.query.masterfolderId ? Number(req.query.masterfolderId) : null;
     const fyId = req.query.fyId ? Number(req.query.fyId) : null;
-    if (!Number.isFinite(companyId) || !Number.isFinite(fyId)) {
-      return res.status(400).json({ error: 'companyId and fyId are required.' });
+    if (!Number.isFinite(masterfolderId) || !Number.isFinite(fyId)) {
+      return res.status(400).json({ error: 'masterfolderId and fyId are required.' });
     }
 
     const deptRows = await pool.query(
       `SELECT id, name
-       FROM company_departments
-       WHERE company_id = $1 AND fy_id = $2
+       FROM masterfolder_categories
+       WHERE masterfolder_id = $1 AND fy_id = $2
        ORDER BY LOWER(name) ASC`,
-      [companyId, fyId]
+      [masterfolderId, fyId]
     ).catch(() => ({ rows: [] }));
 
-    let departments = deptRows.rows.map((d) => ({ id: d.id, name: d.name }));
+    let categories = deptRows.rows.map((d) => ({ id: d.id, name: d.name }));
 
     // Apply access filtering for non-admins (match existing rules).
     if (req.user.role !== 'Admin') {
-      const allowedCompanyIds = Array.from(
+      const allowedMasterfolderIds = Array.from(
         new Set(
-          (Array.isArray(req.user.company_access) ? req.user.company_access : [])
-            .map((x) => Number(x.company_id))
+          (Array.isArray(req.user.masterfolder_access) ? req.user.masterfolder_access : [])
+            .map((x) => Number(x.masterfolder_id))
             .filter((x) => Number.isFinite(x))
         )
       );
-      if (allowedCompanyIds.length > 0 && !allowedCompanyIds.includes(companyId)) {
+      if (allowedMasterfolderIds.length > 0 && !allowedMasterfolderIds.includes(masterfolderId)) {
         return res.status(403).json({ error: 'You do not have access to this company.' });
       }
-      const allowed = new Set(getAllowedDepartmentsForCompany(req.user, companyId));
+      const allowed = new Set(getAllowedDepartmentsForMasterfolder(req.user, masterfolderId));
       const folderAccess = Array.isArray(req.user.folder_access) ? req.user.folder_access : [];
       for (const fAccess of folderAccess) {
-        if (!fAccess.is_exclusion && Number(fAccess.company_id) === Number(companyId)) {
-          const deptName = String(fAccess.department || '').trim();
+        if (!fAccess.is_exclusion && Number(fAccess.masterfolder_id) === Number(masterfolderId)) {
+          const deptName = String(fAccess.category || '').trim();
           if (deptName) allowed.add(deptName);
         }
       }
-      departments = departments.filter((d) => allowed.has(d.name));
+      categories = categories.filter((d) => allowed.has(d.name));
     }
 
-    const deptIds = departments.map((d) => d.id);
+    const deptIds = categories.map((d) => d.id);
     const folderRows = deptIds.length
       ? await pool.query(
-          `SELECT f.id, f.department_id, f.parent_folder_id, f.name, ufa.alias_name as user_alias
-           FROM company_department_folders f
+          `SELECT f.id, f.category_id, f.parent_folder_id, f.name, ufa.alias_name as user_alias
+           FROM masterfolder_category_folders f
            LEFT JOIN user_folder_aliases ufa ON ufa.folder_id = f.id AND ufa.user_id = $2
-           WHERE f.department_id = ANY($1::int[])
+           WHERE f.category_id = ANY($1::int[])
            ORDER BY LOWER(f.name) ASC`,
           [deptIds, req.user.id]
         ).catch(() => ({ rows: [] }))
@@ -1162,14 +1256,14 @@ app.get('/api/structure', verifyToken, async (req, res) => {
 
     const byDept = new Map();
     for (const f of folderRows.rows) {
-      if (!byDept.has(f.department_id)) byDept.set(f.department_id, []);
-      byDept.get(f.department_id).push({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null, user_alias: f.user_alias || null });
+      if (!byDept.has(f.category_id)) byDept.set(f.category_id, []);
+      byDept.get(f.category_id).push({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null, user_alias: f.user_alias || null });
     }
 
     res.json({
-      company_id: companyId,
+      masterfolder_id: masterfolderId,
       fy_id: fyId,
-      departments: departments.map((d) => ({ name: d.name, folders: byDept.get(d.id) || [] })),
+      categories: categories.map((d) => ({ name: d.name, folders: byDept.get(d.id) || [] })),
     });
   } catch (err) {
     res.status(500).json({ error: `Failed to load structure: ${err.message}` });
@@ -1191,30 +1285,29 @@ app.get('/api/auth/heartbeat', verifyToken, async (req, res) => {
   }
 });
 
-// GET Department Stats (for Dashboard)
-app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
+// GET Category Stats (for Dashboard)
+app.get('/api/stats/category/:dept', verifyToken, async (req, res) => {
   const { dept } = req.params;
-  const { companyId, fyId } = req.query;
+  const { masterfolderId, fyId } = req.query;
 
-  if (req.user.role !== 'Admin' && req.user.department !== dept) {
-    return res.status(403).json({ error: "Access denied to this department's stats." });
+  if (req.user.role !== 'Admin' && req.user.category !== dept) {
+    return res.status(403).json({ error: "Access denied to this category's stats." });
   }
 
   try {
-    const normalizedCompanyId = companyId ? Number(companyId) : null;
+    const normalizedCompanyId = masterfolderId ? Number(masterfolderId) : null;
     const normalizedFyId = fyId ? Number(fyId) : null;
-    if (!normalizedCompanyId || !normalizedFyId) {
-      return res.status(400).json({ error: "companyId and fyId are required." });
+    if (!normalizedCompanyId) {
+      return res.status(400).json({ error: "masterfolderId is required." });
     }
-    if (Number.isNaN(normalizedCompanyId) || Number.isNaN(normalizedFyId)) {
-      return res.status(400).json({ error: "Invalid companyId or fyId." });
-    }
-    const fyMatch = await pool.query(
-      'SELECT id FROM financial_years WHERE id = $1 AND company_id = $2 LIMIT 1',
-      [normalizedFyId, normalizedCompanyId]
-    );
-    if (fyMatch.rows.length === 0) {
-      return res.status(400).json({ error: "Financial year does not belong to the selected company." });
+    if (normalizedFyId) {
+      const fyMatch = await pool.query(
+        'SELECT id FROM financial_years WHERE id = $1 AND masterfolder_id = $2 LIMIT 1',
+        [normalizedFyId, normalizedCompanyId]
+      );
+      if (fyMatch.rows.length === 0) {
+        return res.status(400).json({ error: "Financial year does not belong to the selected masterfolder." });
+      }
     }
 
     // 1. Storage Usage
@@ -1226,10 +1319,10 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
         SUM(CASE WHEN f.minio_filename NOT LIKE 'local:%' THEN f.size_bytes ELSE 0 END) as minio_size
       FROM vault_files f
       JOIN vault_file_metadata m ON f.id = m.file_id
-      WHERE f.department = $1 AND m.company_id = $2 AND m.fy_id = $3
+      WHERE f.category = $1 AND m.masterfolder_id = $2 AND ($3::int IS NULL OR m.fy_id = $3)
     `, [dept, normalizedCompanyId, normalizedFyId]);
 
-    const companyResult = await pool.query('SELECT storage_quota_gb FROM companies WHERE id = $1', [normalizedCompanyId]);
+    const companyResult = await pool.query('SELECT storage_quota_gb FROM masterfolders WHERE id = $1', [normalizedCompanyId]);
     const quotaGb = companyResult.rows[0]?.storage_quota_gb || 5;
 
     // 2. Recent Activity (last 20)
@@ -1239,7 +1332,7 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
       JOIN vault_files f ON a.file_id = f.id
       JOIN vault_file_metadata m ON m.file_id = f.id
       JOIN users u ON a.user_id = u.id
-      WHERE f.department = $1 AND m.company_id = $2 AND m.fy_id = $3
+      WHERE f.category = $1 AND m.masterfolder_id = $2 AND ($3::int IS NULL OR m.fy_id = $3)
       ORDER BY a.created_at DESC
       LIMIT 20
     `, [dept, normalizedCompanyId, normalizedFyId]);
@@ -1249,7 +1342,7 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
       SELECT f.id, f.original_name, f.expiry_date
       FROM vault_files f
       JOIN vault_file_metadata m ON f.id = m.file_id
-      WHERE f.department = $1 AND m.company_id = $2 AND m.fy_id = $3
+      WHERE f.category = $1 AND m.masterfolder_id = $2 AND ($3::int IS NULL OR m.fy_id = $3)
       AND f.expiry_date BETWEEN NOW() AND NOW() + INTERVAL '90 days'
       ORDER BY f.expiry_date ASC
       LIMIT 5
@@ -1260,7 +1353,7 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
       SELECT f.mime_type, COUNT(*) as count
       FROM vault_files f
       JOIN vault_file_metadata m ON f.id = m.file_id
-      WHERE f.department = $1 AND m.company_id = $2 AND m.fy_id = $3
+      WHERE f.category = $1 AND m.masterfolder_id = $2 AND ($3::int IS NULL OR m.fy_id = $3)
       GROUP BY f.mime_type
     `, [dept, normalizedCompanyId, normalizedFyId]);
 
@@ -1270,7 +1363,7 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
       FROM vault_files f
       JOIN vault_file_metadata m ON f.id = m.file_id
       JOIN users u ON f.uploaded_by = u.id
-      WHERE f.department = $1 AND m.company_id = $2 AND m.fy_id = $3
+      WHERE f.category = $1 AND m.masterfolder_id = $2 AND ($3::int IS NULL OR m.fy_id = $3)
       GROUP BY u.username
       ORDER BY upload_count DESC
       LIMIT 5
@@ -1281,7 +1374,7 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
       SELECT f1.file_hash, COUNT(f1.id) as count, SUM(f1.size_bytes) - MAX(f1.size_bytes) as wasted_size
       FROM vault_files f1
       JOIN vault_file_metadata m ON f1.id = m.file_id
-      WHERE f1.department = $1 AND m.company_id = $2 AND m.fy_id = $3
+      WHERE f1.category = $1 AND m.masterfolder_id = $2 AND ($3::int IS NULL OR m.fy_id = $3)
       GROUP BY f1.file_hash
       HAVING COUNT(f1.id) > 1
     `, [dept, normalizedCompanyId, normalizedFyId]);
@@ -1289,7 +1382,7 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
     // 7. Cross-FY Comparison
     const lastFyResult = await pool.query(`
       SELECT id FROM financial_years 
-      WHERE company_id = $1 AND id < $2 
+      WHERE masterfolder_id = $1 AND id < $2 
       ORDER BY id DESC LIMIT 1
     `, [normalizedCompanyId, normalizedFyId]);
 
@@ -1300,7 +1393,7 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
         SELECT COUNT(*) as total_files, SUM(f.size_bytes) as total_size
         FROM vault_files f
         JOIN vault_file_metadata m ON f.id = m.file_id
-        WHERE f.department = $1 AND m.company_id = $2 AND m.fy_id = $3
+        WHERE f.category = $1 AND m.masterfolder_id = $2 AND ($3::int IS NULL OR m.fy_id = $3)
       `, [dept, normalizedCompanyId, lastFyId]);
       lastFyStats = {
         total_files: parseInt(lastFyStorage.rows[0].total_files) || 0,
@@ -1332,7 +1425,7 @@ app.get('/api/stats/department/:dept', verifyToken, async (req, res) => {
 
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch department stats" });
+    res.status(500).json({ error: "Failed to fetch category stats" });
   }
 });
 
@@ -1344,13 +1437,13 @@ app.get('/api/preview/:id', verifyToken, async (req, res) => {
   try {
     await hydrateRequestUser(req);
     const fileResult = await pool.query(
-      'SELECT minio_filename, original_name, mime_type, department FROM vault_files WHERE id = $1 LIMIT 1',
+      'SELECT minio_filename, original_name, mime_type, category FROM vault_files WHERE id = $1 LIMIT 1',
       [req.params.id]
     );
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
 
     const fileRecord = fileResult.rows[0];
-    if (!canAccessDepartment(req.user, fileRecord.department)) {
+    if (!canAccessCategory(req.user, fileRecord.category)) {
       return res.status(403).json({ error: 'Access Denied.' });
     }
 
@@ -1426,13 +1519,13 @@ app.get('/api/stream/:id', verifyToken, async (req, res) => {
   try {
     await hydrateRequestUser(req);
     const fileResult = await pool.query(
-      'SELECT minio_filename, original_name, mime_type, department FROM vault_files WHERE id = $1 LIMIT 1',
+      'SELECT minio_filename, original_name, mime_type, category FROM vault_files WHERE id = $1 LIMIT 1',
       [req.params.id]
     );
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
 
     const fileRecord = fileResult.rows[0];
-    if (!canAccessDepartment(req.user, fileRecord.department)) {
+    if (!canAccessCategory(req.user, fileRecord.category)) {
       return res.status(403).json({ error: 'Access Denied.' });
     }
 
@@ -1505,7 +1598,7 @@ app.get('/api/stream/:id', verifyToken, async (req, res) => {
 app.get('/api/public/preview/:id', async (req, res) => {
   try {
     const fileResult = await pool.query(
-      'SELECT minio_filename, original_name, mime_type, department FROM vault_files WHERE id = $1 LIMIT 1',
+      'SELECT minio_filename, original_name, mime_type, category FROM vault_files WHERE id = $1 LIMIT 1',
       [req.params.id]
     );
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
@@ -1579,12 +1672,12 @@ app.get(/^\/api\/download\/(.+)$/, verifyToken, async (req, res) => {
     const minioFilename = req.params[0];
     await hydrateRequestUser(req);
     // Check Database Privacy First
-    const fileResult = await pool.query('SELECT department FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
+    const fileResult = await pool.query('SELECT category FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
     if (fileResult.rows.length === 0) return res.status(404).json({ error: "File not found in database" });
 
     const fileRecord = fileResult.rows[0];
-    if (!canAccessDepartment(req.user, fileRecord.department)) {
-      return res.status(403).json({ error: "Access Denied. You can only download files from your assigned department." });
+    if (!canAccessCategory(req.user, fileRecord.category)) {
+      return res.status(403).json({ error: "Access Denied. You can only download files from your assigned category." });
     }
 
     const isLocal = minioFilename.startsWith('local:');
@@ -1614,7 +1707,7 @@ app.get(/^\/api\/download\/(.+)$/, verifyToken, async (req, res) => {
 app.get(/^\/api\/public\/download\/(.+)$/, async (req, res) => {
   try {
     const minioFilename = req.params[0];
-    const fileResult = await pool.query('SELECT original_name, department FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
+    const fileResult = await pool.query('SELECT original_name, category FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
 
     const fileRecord = fileResult.rows[0];
@@ -1666,10 +1759,10 @@ app.delete('/api/files/:id', verifyToken, async (req, res) => {
     const fileRecord = result.rows[0];
     
     // FY state check
-    if (fileRecord.fy_status === 'Locked') {
+    if (fileRecord.fy_status === 'Locked' && req.user.role !== 'Admin') {
       return res.status(403).json({ error: "Cannot delete file: Financial Year is Locked." });
     }
-    if (fileRecord.fy_status === 'Archived') {
+    if (fileRecord.fy_status === 'Archived' && req.user.role !== 'Admin') {
       return res.status(403).json({ error: "Cannot delete file: Financial Year is Archived." });
     }
     const isLocal = fileRecord.minio_filename.startsWith('local:');
@@ -1728,8 +1821,8 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
   if (action === 'MOVE' && req.user.role === 'Staff') {
     return res.status(403).json({ error: "Staff cannot move files." });
   }
-  if (action === 'MOVE' && req.user.role === 'Manager' && normalizedTargetDepartment !== req.user.department) {
-    return res.status(403).json({ error: "Managers can only move files to their assigned department." });
+  if (action === 'MOVE' && req.user.role === 'Manager' && normalizedTargetDepartment !== req.user.category) {
+    return res.status(403).json({ error: "Managers can only move files to their assigned category." });
   }
 
   const client = await pool.connect();
@@ -1767,10 +1860,10 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
       }
       
       // FY state checks
-      if (fileRecord.fy_status === 'Locked') {
+      if (fileRecord.fy_status === 'Locked' && req.user.role !== 'Admin') {
         throw new Error(`Financial Year is Locked for file: ${fileRecord.original_name}`);
       }
-      if (fileRecord.fy_status === 'Archived' && ['DELETE', 'MOVE', 'RENAME', 'TAG', 'EXPIRY', 'DELETE_COPIES'].includes(action)) {
+      if (fileRecord.fy_status === 'Archived' && ['DELETE', 'MOVE', 'RENAME', 'TAG', 'EXPIRY', 'DELETE_COPIES'].includes(action) && req.user.role !== 'Admin') {
         throw new Error(`Financial Year is Archived. Only copying is allowed for file: ${fileRecord.original_name}`);
       }
 
@@ -1782,24 +1875,24 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
         case 'MOVE':
           undoEntries.push({
             file_id: fileId,
-            prev_department: fileRecord.department,
+            prev_department: fileRecord.category,
             prev_folder: fileRecord.folder ?? null,
           });
           if (payload?.departmentsMap && payload.departmentsMap[fileId] !== undefined) {
-            await client.query('UPDATE vault_files SET department = $1 WHERE id = $2', [payload.departmentsMap[fileId], fileId]);
+            await client.query('UPDATE vault_files SET category = $1 WHERE id = $2', [payload.departmentsMap[fileId], fileId]);
           } else if (normalizedTargetDepartment) {
             await client.query(
-              'UPDATE vault_files SET department = $1, folder = $2 WHERE id = $3',
+              'UPDATE vault_files SET category = $1, folder = $2 WHERE id = $3',
               [normalizedTargetDepartment, normalizedTargetFolder, fileId]
             );
           } else {
-            throw new Error("Target department is required");
+            throw new Error("Target category is required");
           }
           break;
         case 'COPY':
           const copyName = `${crypto.randomUUID()}-${fileRecord.original_name}`;
           const newOriginalName = `(Copy) ${fileRecord.original_name}`;
-          const copyTargetDept = normalizedTargetDepartment || fileRecord.department;
+          const copyTargetDept = normalizedTargetDepartment || fileRecord.category;
           const copyTargetFolder = normalizedTargetFolder !== null ? normalizedTargetFolder : fileRecord.folder;
           
           const isLocalCopy = fileRecord.minio_filename.startsWith('local:');
@@ -1817,18 +1910,18 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
           }
           
           const copyResult = await client.query(
-            `INSERT INTO vault_files (original_name, minio_filename, mime_type, size_bytes, file_hash, department, folder, uploaded_by, tags, auto_name, custom_name) 
+            `INSERT INTO vault_files (original_name, minio_filename, mime_type, size_bytes, file_hash, category, folder, uploaded_by, tags, auto_name, custom_name) 
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
             [newOriginalName, newStorageName, fileRecord.mime_type, fileRecord.size_bytes, fileRecord.file_hash, copyTargetDept, copyTargetFolder, req.user.id, fileRecord.tags ? JSON.stringify(fileRecord.tags) : '[]', fileRecord.auto_name || null, `(Copy) ${fileRecord.custom_name || fileRecord.original_name}`]
           );
           const sourceMeta = await client.query(
-            'SELECT company_id, fy_id FROM vault_file_metadata WHERE file_id = $1 LIMIT 1',
+            'SELECT masterfolder_id, fy_id FROM vault_file_metadata WHERE file_id = $1 LIMIT 1',
             [fileId]
           );
           if (sourceMeta.rows.length > 0) {
             await client.query(
-              'INSERT INTO vault_file_metadata (file_id, company_id, fy_id) VALUES ($1, $2, $3)',
-              [copyResult.rows[0].id, sourceMeta.rows[0].company_id, sourceMeta.rows[0].fy_id]
+              'INSERT INTO vault_file_metadata (file_id, masterfolder_id, fy_id) VALUES ($1, $2, $3)',
+              [copyResult.rows[0].id, sourceMeta.rows[0].masterfolder_id, sourceMeta.rows[0].fy_id]
             );
           }
           if (!req.createdIds) req.createdIds = [];
@@ -1852,11 +1945,11 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
             nextFolder = raw === null || raw === undefined || String(raw).trim() === '' ? null : String(raw).trim();
             if (nextFolder) {
               const meta = await client.query(
-                'SELECT company_id, fy_id FROM vault_file_metadata WHERE file_id = $1 LIMIT 1',
+                'SELECT masterfolder_id, fy_id FROM vault_file_metadata WHERE file_id = $1 LIMIT 1',
                 [fileId]
               );
               if (meta.rows.length > 0) {
-                await ensureFolderExists(meta.rows[0].company_id, meta.rows[0].fy_id, fileRecord.department, nextFolder);
+                await ensureFolderExists(meta.rows[0].masterfolder_id, meta.rows[0].fy_id, fileRecord.category, nextFolder);
               }
             }
           }
@@ -1952,7 +2045,7 @@ app.get('/api/files/bulk/download', verifyToken, async (req, res) => {
     const result = await pool.query('SELECT * FROM vault_files WHERE id = ANY($1::int[])', [fileIds]);
     
     // Filter out files user can't download
-    const filesToDownload = result.rows.filter(fileRecord => canAccessDepartment(req.user, fileRecord.department));
+    const filesToDownload = result.rows.filter(fileRecord => canAccessCategory(req.user, fileRecord.category));
 
     if (filesToDownload.length === 0) {
       return res.status(403).json({ error: "No accessible files to download." });
@@ -2080,20 +2173,20 @@ async function syncFinancialYears() {
     const currentFY = getCurrentFY();
     console.log(`[FY Engine] Current FY should be: ${currentFY.name}`);
 
-    // 2. Ensure all companies have this FY
-    const companies = await client.query('SELECT id FROM companies');
-    for (const company of companies.rows) {
+    // 2. Ensure all masterfolders have this FY
+    const masterfolders = await client.query('SELECT id FROM masterfolders');
+    for (const masterfolder of masterfolders.rows) {
       const exists = await client.query(
-        'SELECT id FROM financial_years WHERE company_id = $1 AND name = $2',
-        [company.id, currentFY.name]
+        'SELECT id FROM financial_years WHERE masterfolder_id = $1 AND name = $2',
+        [masterfolder.id, currentFY.name]
       );
 
       if (exists.rows.length === 0) {
         await client.query(
-          `INSERT INTO financial_years (company_id, name, start_date, end_date, status) VALUES ($1, $2, $3, $4, 'Active')`,
-          [company.id, currentFY.name, currentFY.start_date, currentFY.end_date]
+          `INSERT INTO financial_years (masterfolder_id, name, start_date, end_date, status) VALUES ($1, $2, $3, $4, 'Active')`,
+          [masterfolder.id, currentFY.name, currentFY.start_date, currentFY.end_date]
         );
-        console.log(`[FY Engine] Created ${currentFY.name} for company ${company.id}`);
+        console.log(`[FY Engine] Created ${currentFY.name} for masterfolder ${masterfolder.id}`);
       } else {
         // Ensure the current FY is Active
         await client.query(
@@ -2102,11 +2195,11 @@ async function syncFinancialYears() {
         );
       }
 
-      // 3. Archive all past FYs for this company
+      // 3. Archive all past FYs for this masterfolder
       await client.query(
         `UPDATE financial_years SET status = 'Archived' 
-         WHERE company_id = $1 AND name != $2 AND status = 'Active'`,
-        [company.id, currentFY.name]
+         WHERE masterfolder_id = $1 AND name != $2 AND status = 'Active'`,
+        [masterfolder.id, currentFY.name]
       );
     }
 
@@ -2162,7 +2255,7 @@ async function bootstrapAdminIfConfigured() {
   const adminEmail = String(env.ADMIN_BOOTSTRAP.email || '').trim();
   const adminPassword = String(env.ADMIN_BOOTSTRAP.password || '').trim();
   const adminUsername = String(env.ADMIN_BOOTSTRAP.username || 'admin').trim();
-  const adminDepartment = String(env.ADMIN_BOOTSTRAP.department || 'Admin').trim();
+  const adminDepartment = String(env.ADMIN_BOOTSTRAP.category || 'Admin').trim();
 
   if (!adminEmail || !adminPassword) {
     console.warn('[Startup] Admin bootstrap is enabled but email/password are missing. Skipping bootstrap.');
@@ -2178,7 +2271,7 @@ async function bootstrapAdminIfConfigured() {
 
     const passwordHash = await bcrypt.hash(adminPassword, 10);
     await pool.query(
-      `INSERT INTO users (username, email, password_hash, role, department, status)
+      `INSERT INTO users (username, email, password_hash, role, category, status)
        VALUES ($1, $2, $3, 'Admin', $4, 'Active')`,
       [adminUsername || 'admin', adminEmail, passwordHash, adminDepartment || 'Admin']
     );
@@ -2216,14 +2309,44 @@ app.listen(PORT, HOST, async () => {
   });
   console.log('[Cron] Nightly FY check scheduled for 02:00 AM.');
 
-  cron.schedule(BACKUP_CRON, async () => {
-    console.log('[Cron] Running scheduled backup snapshot...');
+  let backupTask = null;
+
+  function scheduleBackup() {
+    if (backupTask) backupTask.stop();
+    let cronTime = BACKUP_CRON;
+    let enabled = true;
     try {
-      const snapshot = await createBackupSnapshot(pool, { reason: 'scheduled' });
-      console.log(`[Cron] Backup created: ${snapshot.backup_id}`);
-    } catch (error) {
-      console.error('[Cron] Backup creation failed:', error.message);
+      const configPath = require('path').join(__dirname, '../../backup_config.json');
+      if (require('fs').existsSync(configPath)) {
+        const conf = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
+        if (conf.enabled === false) enabled = false;
+        if (conf.cron) cronTime = conf.cron;
+      }
+    } catch(e) {}
+    
+    if (enabled) {
+      backupTask = cron.schedule(cronTime, async () => {
+        console.log('[Cron] Running scheduled backup snapshot...');
+        try {
+          const snapshot = await createBackupSnapshot(pool, { reason: 'scheduled' });
+          console.log(`[Cron] Backup created: ${snapshot.backup_id}`);
+        } catch (error) {
+          console.error('[Cron] Backup creation failed:', error.message);
+        }
+      });
+      console.log(`[Cron] Backup scheduler active: ${cronTime}`);
+    } else {
+      console.log('[Cron] Backup scheduler is disabled by config.');
     }
-  });
-  console.log(`[Cron] Backup scheduler active: ${BACKUP_CRON}`);
+  }
+
+  scheduleBackup();
+
+  try {
+    const configPath = require('path').join(__dirname, '../../backup_config.json');
+    require('fs').watchFile(configPath, () => {
+      console.log('[Cron] Backup config changed, rescheduling...');
+      scheduleBackup();
+    });
+  } catch(e) {}
 });

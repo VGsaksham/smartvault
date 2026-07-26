@@ -1,4 +1,4 @@
-module.exports = {
+﻿module.exports = {
   apps: [
     {
       name: 'sv-minio',
@@ -11,8 +11,7 @@ module.exports = {
     },
     {
       name: 'sv-api',
-      script: 'npm',
-      args: 'run dev',
+      script: 'server.js',
       cwd: '/mnt/c/Users/saksham/Desktop/codes/webapps/smartvault/smartvault-api',
     },
     {

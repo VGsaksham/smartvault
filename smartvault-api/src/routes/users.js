@@ -5,16 +5,15 @@ const { verifyToken } = require('../middleware/auth');
 const { logAction } = require('../services/auditService');
 const { hydrateRequestUser } = require('../services/accessService');
 const {
-  ensureUserCompanyAccessSchema,
-  replaceUserCompanyAccess,
-} = require('../services/userCompanyAccessService');
+  ensureUsermasterfolderAccessSchema,
+  replaceUsermasterfolderAccess,
+} = require('../services/usermasterfolderAccessService');
 
 router.get('/', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: "Only Administrators can view users." });
   try {
-    const { companyId, fyId, scope } = req.query;
-    const normalizedCompanyId = companyId ? Number(companyId) : null;
-    const normalizedFyId = fyId ? Number(fyId) : null;
+    const { masterfolderId, dummyNull, scope } = req.query;
+    const normalizedMasterfolderId = masterfolderId ? Number(masterfolderId) : null;
     const colResult = await pool.query(
       `SELECT column_name
        FROM information_schema.columns
@@ -22,74 +21,81 @@ router.get('/', verifyToken, async (req, res) => {
     );
     const userCols = new Set(colResult.rows.map((r) => r.column_name));
 
-    const companyAccessTableResult = await pool.query(
-      `SELECT to_regclass('public.user_company_access') IS NOT NULL AS exists`
+    const masterfolderAccessTableResult = await pool.query(
+      `SELECT to_regclass('public.user_masterfolder_access') IS NOT NULL AS exists`
     ).catch(() => ({ rows: [{ exists: false }] }));
-    const hasUserCompanyAccessTable = Boolean(companyAccessTableResult.rows?.[0]?.exists);
-    let canReadCompanyAccess = false;
-    if (hasUserCompanyAccessTable) {
-      const companyAccessColsResult = await pool.query(
+    const hasUsermasterfolderAccessTable = Boolean(masterfolderAccessTableResult.rows?.[0]?.exists);
+    let canReadmasterfolderAccess = false;
+    if (hasUsermasterfolderAccessTable) {
+      const masterfolderAccessColsResult = await pool.query(
         `SELECT column_name
          FROM information_schema.columns
-         WHERE table_schema = 'public' AND table_name = 'user_company_access'`
+         WHERE table_schema = 'public' AND table_name = 'user_masterfolder_access'`
       ).catch(() => ({ rows: [] }));
-      const companyAccessCols = new Set(companyAccessColsResult.rows.map((r) => r.column_name));
-      canReadCompanyAccess =
-        companyAccessCols.has('user_id') &&
-        companyAccessCols.has('company_id') &&
-        companyAccessCols.has('department') &&
-        companyAccessCols.has('can_upload') &&
-        companyAccessCols.has('is_primary');
+      const masterfolderAccessCols = new Set(masterfolderAccessColsResult.rows.map((r) => r.column_name));
+      canReadmasterfolderAccess =
+        masterfolderAccessCols.has('user_id') &&
+        masterfolderAccessCols.has('masterfolder_id') &&
+        masterfolderAccessCols.has('category') &&
+        masterfolderAccessCols.has('can_upload') &&
+        masterfolderAccessCols.has('is_primary');
     }
+    const folderAccessTableResult = await pool.query(
+      `SELECT to_regclass('public.user_folder_access') IS NOT NULL AS exists`
+    ).catch(() => ({ rows: [{ exists: false }] }));
+    const hasUserFolderAccessTable = Boolean(folderAccessTableResult.rows?.[0]?.exists);
     let query = `
       SELECT
              u.id,
              u.username,
              u.email,
              ${userCols.has('role') ? 'u.role' : "'Staff'::text AS role"},
-             ${userCols.has('department') ? 'u.department' : "NULL::text AS department"},
-             ${userCols.has('allowed_departments') ? 'u.allowed_departments' : "ARRAY[]::text[] AS allowed_departments"},
+             ${userCols.has('category') ? 'u.category' : "NULL::text AS category"},
+             ${userCols.has('allowed_categories') ? 'u.allowed_categories' : "ARRAY[]::text[] AS allowed_categories"},
              ${userCols.has('can_bulk_move') ? 'COALESCE(u.can_bulk_move, true)' : 'true'} AS can_bulk_move,
              ${userCols.has('can_bulk_copy') ? 'COALESCE(u.can_bulk_copy, true)' : 'true'} AS can_bulk_copy,
              ${userCols.has('can_bulk_delete') ? 'COALESCE(u.can_bulk_delete, false)' : 'false'} AS can_bulk_delete,
              ${userCols.has('can_bulk_rename') ? 'COALESCE(u.can_bulk_rename, true)' : 'true'} AS can_bulk_rename,
              ${userCols.has('can_bulk_download') ? 'COALESCE(u.can_bulk_download, true)' : 'true'} AS can_bulk_download,
+             ${userCols.has('can_download_folders') ? 'COALESCE(u.can_download_folders, false)' : 'false'} AS can_download_folders,
              ${userCols.has('can_upload_to_allowed') ? 'COALESCE(u.can_upload_to_allowed, false)' : 'false'} AS can_upload_to_allowed,
+             ${userCols.has('can_manage_structure') ? 'COALESCE(u.can_manage_structure, false)' : 'false'} AS can_manage_structure,
              ${userCols.has('theme_preference') ? "COALESCE(u.theme_preference, 'light')" : "'light'"} AS theme_preference,
              ${userCols.has('status') ? 'u.status' : "'Active'::text AS status"},
              ${userCols.has('last_ip_address') ? 'u.last_ip_address' : 'NULL::text AS last_ip_address'},
              ${userCols.has('created_at') ? 'u.created_at' : 'NOW() AS created_at'},
-             ${canReadCompanyAccess ? "COALESCE(ca.company_access, '[]'::json) AS company_access" : "'[]'::json AS company_access"},
-             COALESCE(fa.folder_access, '[]'::json) AS folder_access
+             ${canReadmasterfolderAccess ? "COALESCE(ca.masterfolder_access, '[]'::json) AS masterfolder_access" : "'[]'::json AS masterfolder_access"},
+             ${hasUserFolderAccessTable ? "COALESCE(fa.folder_access, '[]'::json) AS folder_access" : "'[]'::json AS folder_access"}
       FROM users u
-      ${canReadCompanyAccess ? `
+      ${canReadmasterfolderAccess ? `
       LEFT JOIN LATERAL (
         SELECT json_agg(
           json_build_object(
-            'company_id', uca.company_id,
-            'company_name', c.name,
-            'department', uca.department,
+            'masterfolder_id', uca.masterfolder_id,
+            'masterfolder_name', m.name,
+            'category', uca.category,
             'can_upload', uca.can_upload,
             'is_primary', uca.is_primary
           )
-          ORDER BY uca.is_primary DESC, c.name, uca.department
-        ) AS company_access
-        FROM user_company_access uca
-        JOIN companies c ON c.id = uca.company_id
+          ORDER BY uca.is_primary DESC, m.name, uca.category
+        ) AS masterfolder_access
+        FROM user_masterfolder_access uca
+        JOIN masterfolders m ON m.id = uca.masterfolder_id
         WHERE uca.user_id = u.id
       ) ca ON TRUE` : ''}
+      ${hasUserFolderAccessTable ? `
       LEFT JOIN LATERAL (
         SELECT json_agg(
           json_build_object(
-            'company_id', ufa.company_id,
-            'department', ufa.department,
+            'masterfolder_id', ufa.masterfolder_id,
+            'category', ufa.category,
             'folder_path', ufa.folder_path,
             'is_exclusion', ufa.is_exclusion
           )
         ) AS folder_access
         FROM user_folder_access ufa
         WHERE ufa.user_id = u.id
-      ) fa ON TRUE
+      ) fa ON TRUE` : ''}
       WHERE 1=1
     `;
     // Hide superadmin from Admin UI list (still exists in DB).
@@ -98,21 +104,20 @@ router.get('/', verifyToken, async (req, res) => {
     let p = 1;
     // By default, Admin user management should list all users, including newly created accounts
     // that have not uploaded files yet. Filter by uploader activity only when explicitly requested.
-    if ((normalizedCompanyId || normalizedFyId) && scope === 'activeUploaders') {
+    if (normalizedMasterfolderId && scope === 'activeUploaders') {
       query += ` AND u.id IN (SELECT DISTINCT vf.uploaded_by FROM vault_files vf JOIN vault_file_metadata vfm ON vfm.file_id = vf.id WHERE 1=1 `;
-      if (normalizedCompanyId) { query += ` AND vfm.company_id = $${p++}`; values.push(normalizedCompanyId); }
-      if (normalizedFyId) { query += ` AND vfm.fy_id = $${p++}`; values.push(normalizedFyId); }
+      query += ` AND vfm.masterfolder_id = $${p++}`; values.push(normalizedMasterfolderId);
       query += `)`;
     }
     query += ` ORDER BY u.created_at DESC`;
     const result = await pool.query(query, values);
 
-    const deptPermResult = await pool.query('SELECT user_id, department, can_upload FROM user_department_permissions')
+    const deptPermResult = await pool.query('SELECT user_id, category, can_upload FROM user_category_permissions')
       .catch(() => ({ rows: [] }));
     const deptPermByUser = {};
     for (const row of deptPermResult.rows) {
       if (!deptPermByUser[row.user_id]) deptPermByUser[row.user_id] = {};
-      deptPermByUser[row.user_id][row.department] = Boolean(row.can_upload);
+      deptPermByUser[row.user_id][row.category] = Boolean(row.can_upload);
     }
 
     res.json(result.rows.map(u => ({ ...u, dept_upload_permissions: deptPermByUser[u.id] || {} })));
@@ -124,9 +129,9 @@ router.get('/', verifyToken, async (req, res) => {
 
 router.put('/:id/role', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: "Only Administrators can modify user roles." });
-  const { role, department } = req.body;
-  if (!role && !department) {
-    return res.status(400).json({ error: "Role or department is required." });
+  const { role, category } = req.body;
+  if (!role && !category) {
+    return res.status(400).json({ error: "Role or category is required." });
   }
 
   const client = await pool.connect();
@@ -147,16 +152,17 @@ router.put('/:id/role', verifyToken, async (req, res) => {
       updates.push(`role = $${c++}`);
       params.push(role);
     }
-    if (department && userColumns.has('department')) {
-      updates.push(`department = $${c++}`);
-      params.push(department);
+    if (category && userColumns.has('category')) {
+      updates.push(`category = $${c++}`);
+      params.push(category);
     }
-    if (role && userColumns.has('allowed_departments')) updates.push(`allowed_departments = ARRAY[]::text[]`);
+    if (role && userColumns.has('allowed_categories')) updates.push(`allowed_categories = ARRAY[]::text[]`);
     if (role && userColumns.has('can_bulk_move')) updates.push(`can_bulk_move = true`);
     if (role && userColumns.has('can_bulk_copy')) updates.push(`can_bulk_copy = true`);
     if (role && userColumns.has('can_bulk_delete')) updates.push(`can_bulk_delete = false`);
     if (role && userColumns.has('can_bulk_rename')) updates.push(`can_bulk_rename = true`);
     if (role && userColumns.has('can_bulk_download')) updates.push(`can_bulk_download = true`);
+    if (role && userColumns.has('can_download_folders')) updates.push(`can_download_folders = true`);
     if (role && userColumns.has('can_upload_to_allowed')) updates.push(`can_upload_to_allowed = false`);
 
     if (updates.length === 0) {
@@ -176,7 +182,7 @@ router.put('/:id/role', verifyToken, async (req, res) => {
 
     if (role) {
       await client.query('DELETE FROM user_bulk_permissions WHERE user_id = $1', [req.params.id]).catch(() => {});
-      await client.query('DELETE FROM user_department_permissions WHERE user_id = $1', [req.params.id]).catch(() => {});
+      await client.query('DELETE FROM user_category_permissions WHERE user_id = $1', [req.params.id]).catch(() => {});
     }
     await client.query('COMMIT');
     res.json({ success: true, user: result.rows[0] });
@@ -214,42 +220,44 @@ router.patch('/:id/permissions', verifyToken, async (req, res) => {
   if (!Number.isFinite(userId)) return res.status(400).json({ error: "Invalid user id." });
 
   const {
-    allowed_departments = [],
+    allowed_categories = [],
     can_bulk_move,
     can_bulk_copy,
     can_bulk_delete,
     can_bulk_rename,
     can_bulk_download,
+    can_download_folders,
     can_upload_to_allowed,
+    can_manage_structure,
     preference_updates,
-    company_access = [],
+    masterfolder_access = [],
     folder_access = [],
   } = req.body || {};
 
-  const companyAccessDepartments = (Array.isArray(company_access) ? company_access : [])
-    .map((x) => String(x?.department || '').trim())
+  const masterfolderAccessCategories = (Array.isArray(masterfolder_access) ? masterfolder_access : [])
+    .map((x) => String(x?.category || '').trim())
     .filter(Boolean);
-  const folderAccessDepartments = (Array.isArray(folder_access) ? folder_access : [])
-    .map((x) => String(x?.department || '').trim())
+  const folderAccessCategories = (Array.isArray(folder_access) ? folder_access : [])
+    .map((x) => String(x?.category || '').trim())
     .filter(Boolean);
-  const safeAllowedDepartments = Array.from(new Set([
-    ...(Array.isArray(allowed_departments) ? allowed_departments : []),
-    ...companyAccessDepartments,
-    ...folderAccessDepartments,
+  const safeAllowedCategories = Array.from(new Set([
+    ...(Array.isArray(allowed_categories) ? allowed_categories : []),
+    ...masterfolderAccessCategories,
+    ...folderAccessCategories,
   ].map((d) => String(d || '').trim()).filter(Boolean)));
-  const departmentUploadPermissions = preference_updates?.department_upload_permissions || {};
+  const categoryUploadPermissions = preference_updates?.category_upload_permissions || {};
 
   const client = await pool.connect();
   try {
-    await ensureUserCompanyAccessSchema(client);
+    await ensureUsermasterfolderAccessSchema(client);
     await client.query('BEGIN');
 
     await client.query(
       `UPDATE users
-       SET allowed_departments = $1
+       SET allowed_categories = $1, can_manage_structure = $3, can_download_folders = $4, can_bulk_download = $5
        WHERE id = $2`,
-      [safeAllowedDepartments, userId]
-    ).catch(() => {});
+      [safeAllowedCategories, userId, can_manage_structure === true, can_download_folders === true, (can_download_folders === true || can_bulk_download !== false)]
+    ).catch((err) => console.log('user structure err', err));
 
     await client.query(
       `INSERT INTO user_bulk_permissions (user_id, can_bulk_move, can_bulk_copy, can_bulk_delete, can_bulk_rename, can_bulk_download)
@@ -267,7 +275,7 @@ router.patch('/:id/permissions', verifyToken, async (req, res) => {
         can_bulk_copy !== false,
         can_bulk_delete === true,
         can_bulk_rename !== false,
-        can_bulk_download !== false,
+        (can_download_folders === true || can_bulk_download !== false),
       ]
     ).catch(() => {});
 
@@ -280,31 +288,31 @@ router.patch('/:id/permissions', verifyToken, async (req, res) => {
       [userId, can_upload_to_allowed === true]
     ).catch(() => {});
 
-    await client.query('DELETE FROM user_department_permissions WHERE user_id = $1', [userId]).catch(() => {});
-    for (const department of safeAllowedDepartments) {
+    await client.query('DELETE FROM user_category_permissions WHERE user_id = $1', [userId]).catch(() => {});
+    for (const category of safeAllowedCategories) {
       await client.query(
-        `INSERT INTO user_department_permissions (user_id, department, can_upload)
+        `INSERT INTO user_category_permissions (user_id, category, can_upload)
          VALUES ($1, $2, $3)`,
-        [userId, department, Boolean(departmentUploadPermissions[department])]
+        [userId, category, Boolean(categoryUploadPermissions[category])]
       ).catch(() => {});
     }
 
     const targetUserRes = await client.query(
-      `SELECT department FROM users WHERE id = $1 LIMIT 1`,
+      `SELECT category FROM users WHERE id = $1 LIMIT 1`,
       [userId]
     );
-    const fallbackDepartment =
-      String(safeAllowedDepartments[0] || targetUserRes.rows?.[0]?.department || '').trim();
-    await replaceUserCompanyAccess(client, userId, company_access, fallbackDepartment);
+    const fallbackCategory =
+      String(safeAllowedCategories[0] || targetUserRes.rows?.[0]?.category || '').trim();
+    await replaceUsermasterfolderAccess(client, userId, masterfolder_access, fallbackCategory);
 
     await client.query('DELETE FROM user_folder_access WHERE user_id = $1', [userId]).catch(() => {});
     if (Array.isArray(folder_access)) {
       for (const fa of folder_access) {
-        if (!fa.company_id || !fa.department || !fa.folder_path) continue;
+        if (!fa.masterfolder_id || !fa.category || !fa.folder_path) continue;
         await client.query(
-          `INSERT INTO user_folder_access (user_id, company_id, department, folder_path, is_exclusion)
+          `INSERT INTO user_folder_access (user_id, masterfolder_id, category, folder_path, is_exclusion)
            VALUES ($1, $2, $3, $4, $5)`,
-          [userId, fa.company_id, fa.department, fa.folder_path, Boolean(fa.is_exclusion)]
+          [userId, fa.masterfolder_id, fa.category, fa.folder_path, Boolean(fa.is_exclusion)]
         ).catch(err => console.error("folder_access insert error", err));
       }
     }

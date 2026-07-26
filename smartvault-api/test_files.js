@@ -4,7 +4,7 @@ const { JWT_SECRET } = require('./src/config/env');
 
 async function testFiles() {
   // Get admin user
-  const userResult = await pool.query("SELECT id, username, role, department, allowed_departments, token_version FROM users WHERE role = 'Admin' LIMIT 1");
+  const userResult = await pool.query("SELECT id, username, role, category, allowed_categories, token_version FROM users WHERE role = 'Admin' LIMIT 1");
   const user = userResult.rows[0];
   console.log('Admin user:', JSON.stringify(user));
   
@@ -12,8 +12,8 @@ async function testFiles() {
   const token = jwt.sign({
     id: user.id,
     role: user.role,
-    department: user.department,
-    allowed_departments: user.allowed_departments,
+    category: user.category,
+    allowed_categories: user.allowed_categories,
     token_version: user.token_version
   }, JWT_SECRET, { expiresIn: '1h' });
   

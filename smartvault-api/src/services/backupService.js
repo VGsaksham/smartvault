@@ -95,23 +95,45 @@ async function calculateDirSize(dirPath) {
   return total;
 }
 
-async function fetchVaultSnapshotFromDb(client) {
-  const result = await client.query(`
+async function fetchVaultSnapshotFromDb(client, filters = {}) {
+  let query = `
     SELECT
       vf.*,
-      vfm.company_id,
+      vfm.masterfolder_id,
       vfm.fy_id
     FROM vault_files vf
     LEFT JOIN vault_file_metadata vfm ON vfm.file_id = vf.id
-    ORDER BY vf.id ASC
-  `);
+    WHERE 1=1
+  `;
+  const values = [];
+  
+  if (filters.masterfolder_id) {
+    values.push(filters.masterfolder_id);
+    query += ` AND vfm.masterfolder_id = $${values.length}`;
+  }
+  if (filters.category) {
+    values.push(filters.category);
+    query += ` AND vf.category = $${values.length}`;
+  }
+  if (filters.folder) {
+    if (filters.folder === 'null') {
+      query += ` AND (vf.folder IS NULL OR vf.folder = 'null')`;
+    } else {
+      values.push(filters.folder);
+      query += ` AND vf.folder = $${values.length}`;
+    }
+  }
+  
+  query += ` ORDER BY vf.id ASC`;
+  
+  const result = await client.query(query, values);
 
   return result.rows.map((row) => {
-    const { company_id, fy_id, ...fileRow } = row;
+    const { masterfolder_id, fy_id, ...fileRow } = row;
     return {
       file: fileRow,
       metadata: {
-        company_id: company_id ?? null,
+        masterfolder_id: masterfolder_id ?? null,
         fy_id: fy_id ?? null,
       },
     };
@@ -138,10 +160,10 @@ function buildChangesSummary(snapshotRecords, currentRecords) {
     if ((record.file.original_name || '') !== (curr.file.original_name || '')) filesRenamed += 1;
 
     const moved =
-      (record.file.department || null) !== (curr.file.department || null) ||
+      (record.file.category || null) !== (curr.file.category || null) ||
       (record.file.folder || null) !== (curr.file.folder || null) ||
-      (record.metadata.company_id || null) !== (curr.metadata.company_id || null) ||
-      (record.metadata.fy_id || null) !== (curr.metadata.fy_id || null);
+      (record.metadata.masterfolder_id || null) !== (curr.metadata.masterfolder_id || null) ||
+      (record.metadata.dummyNull || null) !== (curr.metadata.dummyNull || null);
     if (moved) filesMoved += 1;
 
     const updated =
@@ -200,56 +222,116 @@ async function getLatestBackup() {
   return backups[0] || null;
 }
 
-async function backupMinioObjects(targetDir) {
+async function backupMinioObjects(targetDir, records = [], onProgress = null) {
   const minioDir = path.join(targetDir, MINIO_DIR);
+  const objectStoreDir = path.join(getBackupDir(), 'object_store');
   await fs.promises.mkdir(minioDir, { recursive: true });
+  await fs.promises.mkdir(objectStoreDir, { recursive: true });
   const objects = [];
 
-  const stream = minioClient.listObjectsV2(env.MINIO.bucket, '', true);
-  for await (const obj of stream) {
-    if (!obj?.name) continue;
-    const encoded = encodeObjectName(obj.name);
+  const objectsToBackup = new Set();
+  if (!records || records.length === 0) {
+    const stream = minioClient.listObjectsV2(env.MINIO.bucket, '', true);
+    for await (const obj of stream) {
+      if (obj?.name) objectsToBackup.add(obj.name);
+    }
+  } else {
+    for (const r of records) {
+      if (r.file && r.file.minio_filename && !r.file.minio_filename.startsWith('local:')) {
+        objectsToBackup.add(r.file.minio_filename);
+      }
+    }
+  }
+
+  let processed = 0;
+  const total = objectsToBackup.size;
+
+  for (const objectName of objectsToBackup) {
+    const encoded = encodeObjectName(objectName);
+    const storePath = path.join(objectStoreDir, encoded);
     const outPath = path.join(minioDir, encoded);
-    const readStream = await minioClient.getObject(env.MINIO.bucket, obj.name);
-    await pipeline(readStream, fs.createWriteStream(outPath));
-    objects.push({
-      name: obj.name,
-      size: Number(obj.size || 0),
-      file: encoded,
-    });
+
+    if (!(await pathExists(storePath))) {
+      try {
+        const readStream = await minioClient.getObject(env.MINIO.bucket, objectName);
+        await pipeline(readStream, fs.createWriteStream(storePath));
+      } catch (err) {
+        console.error('Failed to download object from MinIO for backup:', objectName, err);
+        processed++;
+        continue;
+      }
+    }
+
+    try {
+      await fs.promises.link(storePath, outPath);
+      const stat = await fs.promises.stat(storePath);
+      objects.push({
+        name: objectName,
+        size: Number(stat.size || 0),
+        file: encoded,
+      });
+    } catch (err) {
+      console.error('Failed to link object from store:', objectName, err);
+    }
+    
+    processed++;
+    if (onProgress) onProgress(processed, total);
   }
 
   return objects;
 }
 
-async function restoreMinioObjects(sourceDir) {
+
+async function restoreMinioObjects(sourceDir, records = [], onProgress = null) {
   const minioDir = path.join(sourceDir, MINIO_DIR);
-  const manifestPath = path.join(sourceDir, MANIFEST_FILE);
-  const manifest = await readJson(manifestPath);
-  const objectManifest = manifest?.storage?.minio_objects || [];
   if (!(await pathExists(minioDir))) return;
 
   const exists = await minioClient.bucketExists(env.MINIO.bucket).catch(() => false);
   if (!exists) await minioClient.makeBucket(env.MINIO.bucket);
 
-  // Clear existing bucket to match backup snapshot.
-  const existing = [];
-  const listStream = minioClient.listObjectsV2(env.MINIO.bucket, '', true);
-  for await (const obj of listStream) {
-    if (obj?.name) existing.push(obj.name);
-  }
-  if (existing.length > 0) {
-    for (const objectName of existing) {
-      await minioClient.removeObject(env.MINIO.bucket, objectName).catch(() => {});
+  const objectsToRestore = new Set();
+  if (!records || records.length === 0) {
+    const entries = await fs.promises.readdir(minioDir);
+    for (const file of entries) {
+      objectsToRestore.add(file);
+    }
+    
+    const existing = [];
+    const listStream = minioClient.listObjectsV2(env.MINIO.bucket, '', true);
+    for await (const obj of listStream) {
+      if (obj?.name) existing.push(obj.name);
+    }
+    if (existing.length > 0) {
+      for (const objectName of existing) {
+        await minioClient.removeObject(env.MINIO.bucket, objectName).catch(() => {});
+      }
+    }
+  } else {
+    for (const r of records) {
+      if (r.file && r.file.minio_filename && !r.file.minio_filename.startsWith('local:')) {
+        objectsToRestore.add(encodeObjectName(r.file.minio_filename));
+      }
     }
   }
 
-  for (const item of objectManifest) {
-    const objectName = item.name || decodeObjectName(item.file || '');
-    if (!objectName || !item.file) continue;
-    const filePath = path.join(minioDir, item.file);
-    const data = await fs.promises.readFile(filePath);
-    await minioClient.putObject(env.MINIO.bucket, objectName, data);
+  let processed = 0;
+  const total = objectsToRestore.size;
+
+  for (const file of objectsToRestore) {
+    const objectName = decodeObjectName(file);
+    if (!objectName) continue;
+    const filePath = path.join(minioDir, file);
+    if (!(await pathExists(filePath))) continue;
+    
+    try {
+      const data = await fs.promises.readFile(filePath);
+      await minioClient.putObject(env.MINIO.bucket, objectName, data);
+    } catch (e) {
+      console.error('Failed to restore object to MinIO:', objectName, e);
+    }
+    
+    processed++;
+    if (onProgress) onProgress(processed, total, 'minio');
   }
 }
 
@@ -290,14 +372,23 @@ async function createBackupSnapshot(pool, options = {}) {
   const client = await pool.connect();
 
   try {
-    const records = await fetchVaultSnapshotFromDb(client);
-    const minioObjects = await backupMinioObjects(folderPath);
-    const mediaResult = await backupLocalMedia(folderPath);
+    const records = await fetchVaultSnapshotFromDb(client, options.filters || {});
+    const minioObjects = await backupMinioObjects(folderPath, records);
+    
+    // For granular backups, local media might not be explicitly filtered right now,
+    // but we'll copy it unless filters were heavily restricted, or we can just backup
+    // it always for safety. For simplicity, we copy it if it's a full backup.
+    let mediaResult = { copied: false };
+    if (!options.filters || Object.keys(options.filters).length === 0) {
+      mediaResult = await backupLocalMedia(folderPath);
+    }
+    
     const payload = {
       backup_id: backupId,
       created_at: new Date().toISOString(),
       created_by_user_id: options.userId || null,
       reason: options.reason || 'scheduled',
+      filters: options.filters || null,
       storage: {
         backup_path: folderPath,
         minio_bucket: env.MINIO.bucket,
@@ -309,21 +400,36 @@ async function createBackupSnapshot(pool, options = {}) {
 
     await writeJson(path.join(folderPath, MANIFEST_FILE), payload);
     await writeJson(path.join(folderPath, DB_SNAPSHOT_FILE), { vault_files: records });
-    await applyRetention();
+    
+    // Retention policy removed as per user request
+    // await applyRetention();
+    
     return { backup_id: backupId, path: folderPath, files_count: records.length };
   } finally {
     client.release();
   }
 }
 
-async function getBackupPreview(pool, backupId) {
+
+async function getBackupPreview(pool, backupId, options = {}) {
   const client = await pool.connect();
   try {
     const backupFolder = resolveBackupFolder(backupId);
     const payload = await readJson(path.join(backupFolder, MANIFEST_FILE));
     const dbSnapshot = await readJson(path.join(backupFolder, DB_SNAPSHOT_FILE));
-    const snapshotRecords = dbSnapshot?.vault_files || [];
-    const currentRecords = await fetchVaultSnapshotFromDb(client);
+    let snapshotRecords = dbSnapshot?.vault_files || [];
+    
+    if (options.filters && Object.keys(options.filters).length > 0) {
+      const { masterfolder_id, category, folder } = options.filters;
+      snapshotRecords = snapshotRecords.filter(r => {
+        if (masterfolder_id && r.metadata?.masterfolder_id !== Number(masterfolder_id)) return false;
+        if (category && r.file?.category !== category) return false;
+        if (folder && r.file?.folder !== folder) return false;
+        return true;
+      });
+    }
+
+    const currentRecords = await fetchVaultSnapshotFromDb(client, options.filters || {});
     const changes = buildChangesSummary(snapshotRecords, currentRecords);
 
     return {
@@ -337,106 +443,32 @@ async function getBackupPreview(pool, backupId) {
   }
 }
 
-async function restoreBackup(pool, backupId) {
+
+async function restoreBackup(pool, backupId, options = {}, onProgress = null) {
   const client = await pool.connect();
   try {
     const backupFolder = resolveBackupFolder(backupId);
     const dbSnapshot = await readJson(path.join(backupFolder, DB_SNAPSHOT_FILE));
-    const snapshotRecords = dbSnapshot?.vault_files || [];
-    const currentRecords = await fetchVaultSnapshotFromDb(client);
+    let snapshotRecords = dbSnapshot?.vault_files || [];
+
+    if (options.filters && Object.keys(options.filters).length > 0) {
+      const { masterfolder_id, category, folder } = options.filters;
+      snapshotRecords = snapshotRecords.filter(r => {
+        if (masterfolder_id && r.metadata?.masterfolder_id !== Number(masterfolder_id)) return false;
+        if (category && r.file?.category !== category) return false;
+        if (folder && r.file?.folder !== folder) return false;
+        return true;
+      });
+    }
+
+    const currentRecords = await fetchVaultSnapshotFromDb(client, options.filters || {});
     const preview = buildChangesSummary(snapshotRecords, currentRecords);
-
-    // --- Pre-flight validation start ---
-    // Validate that all Companies, FYs, Departments, and Folders still exist.
-    const requiredCompanies = new Set();
-    const requiredFys = new Set();
-    const requiredDepts = new Map(); // key: "compId:fyId:deptName", value: { compId, fyId, deptName }
-    const requiredFolders = new Map(); // key: "deptId:folderPath", value: { deptId, folderPath, deptName }
-
-    for (const record of snapshotRecords) {
-      const metadata = record.metadata || {};
-      const file = record.file || {};
-      const compId = metadata.company_id;
-      const fyId = metadata.fy_id;
-      const deptName = file.department;
-      const folderPath = file.folder;
-
-      if (compId) requiredCompanies.add(compId);
-      if (fyId) requiredFys.add(fyId);
-      if (compId && fyId && deptName) {
-        const deptKey = `${compId}:${fyId}:${deptName}`;
-        requiredDepts.set(deptKey, { compId, fyId, deptName });
-        
-        if (folderPath && folderPath !== 'null' && folderPath !== 'undefined') {
-          // We will check folders after verifying departments, so we store the folder paths
-          requiredFolders.set(`${deptKey}::${folderPath}`, { compId, fyId, deptName, folderPath });
-        }
-      }
-    }
-
-    // 1. Check Companies
-    if (requiredCompanies.size > 0) {
-      const res = await client.query('SELECT id, name FROM companies WHERE id = ANY($1)', [Array.from(requiredCompanies)]);
-      const found = new Set(res.rows.map(r => r.id));
-      for (const id of requiredCompanies) {
-        if (!found.has(id)) throw new Error(`Cannot restore backup: Required Company (ID: ${id}) is missing from the database.`);
-      }
-    }
-
-    // 2. Check Financial Years
-    if (requiredFys.size > 0) {
-      const res = await client.query('SELECT id, name FROM financial_years WHERE id = ANY($1)', [Array.from(requiredFys)]);
-      const found = new Set(res.rows.map(r => r.id));
-      for (const id of requiredFys) {
-        if (!found.has(id)) throw new Error(`Cannot restore backup: Required Financial Year (ID: ${id}) is missing from the database.`);
-      }
-    }
-
-    // 3. Check Departments and get their IDs
-    const deptIdMap = new Map(); // deptKey -> deptId
-    for (const { compId, fyId, deptName } of requiredDepts.values()) {
-      const res = await client.query(
-        'SELECT id FROM company_departments WHERE company_id = $1 AND fy_id = $2 AND LOWER(name) = LOWER($3)',
-        [compId, fyId, deptName]
-      );
-      if (res.rows.length === 0) {
-        throw new Error(`Cannot restore backup: Required Department '${deptName}' is missing.`);
-      }
-      deptIdMap.set(`${compId}:${fyId}:${deptName}`, res.rows[0].id);
-    }
-
-    // 4. Check Folders
-    for (const { compId, fyId, deptName, folderPath } of requiredFolders.values()) {
-      const deptKey = `${compId}:${fyId}:${deptName}`;
-      const deptId = deptIdMap.get(deptKey);
-      if (!deptId) continue; // Should be caught above
-      
-      const parts = folderPath.split('/').map(p => p.trim()).filter(Boolean);
-      let parentId = null;
-      for (const part of parts) {
-        let query, params;
-        if (parentId === null) {
-          query = 'SELECT id FROM company_department_folders WHERE department_id = $1 AND parent_folder_id IS NULL AND LOWER(name) = LOWER($2)';
-          params = [deptId, part];
-        } else {
-          query = 'SELECT id FROM company_department_folders WHERE department_id = $1 AND parent_folder_id = $2 AND LOWER(name) = LOWER($3)';
-          params = [deptId, parentId, part];
-        }
-        const folderRes = await client.query(query, params);
-        if (folderRes.rows.length === 0) {
-          throw new Error(`Cannot restore backup: Required folder path '${folderPath}' in Department '${deptName}' is missing.`);
-        }
-        parentId = folderRes.rows[0].id;
-      }
-    }
-    // --- Pre-flight validation end ---
 
     const snapshotById = new Map(snapshotRecords.map((r) => [Number(r.file.id), r]));
     const currentById = new Map(currentRecords.map((r) => [Number(r.file.id), r]));
+    
     const schemaColsResult = await client.query(
-      `SELECT column_name
-       FROM information_schema.columns
-       WHERE table_schema = 'public' AND table_name = 'vault_files'`
+      "SELECT column_name FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'vault_files'"
     );
     const vaultFileColumns = new Set(schemaColsResult.rows.map((r) => r.column_name));
 
@@ -445,7 +477,7 @@ async function restoreBackup(pool, backupId) {
       ['minio_filename', 'minio_filename'],
       ['size_bytes', 'size_bytes'],
       ['mime_type', 'mime_type'],
-      ['department', 'department'],
+      ['category', 'category'],
       ['folder', 'folder'],
       ['file_hash', 'file_hash'],
       ['uploaded_by', 'uploaded_by'],
@@ -464,6 +496,9 @@ async function restoreBackup(pool, backupId) {
       await client.query('DELETE FROM vault_files WHERE id = $1', [currentId]);
     }
 
+    let processed = 0;
+    const total = snapshotRecords.length;
+
     for (const record of snapshotRecords) {
       const file = record.file || {};
       const metadata = record.metadata || {};
@@ -471,37 +506,16 @@ async function restoreBackup(pool, backupId) {
       if (!Number.isFinite(fileId)) continue;
 
       const {
-        original_name = null,
-        minio_filename = null,
-        size_bytes = null,
-        mime_type = null,
-        department = null,
-        folder = null,
-        file_hash = null,
-        uploaded_by = null,
-        tags = null,
-        auto_name = null,
-        custom_name = null,
-        is_starred = false,
-        expiry_date = null,
+        original_name = null, minio_filename = null, size_bytes = null, mime_type = null,
+        category = null, folder = null, file_hash = null, uploaded_by = null,
+        tags = null, auto_name = null, custom_name = null, is_starred = false, expiry_date = null,
       } = file;
 
       const exists = await client.query('SELECT id FROM vault_files WHERE id = $1 LIMIT 1', [fileId]);
       const normalizedTags = tags == null ? null : (typeof tags === 'string' ? tags : JSON.stringify(tags));
       const fileValueByCol = {
-        original_name,
-        minio_filename,
-        size_bytes,
-        mime_type,
-        department,
-        folder,
-        file_hash,
-        uploaded_by,
-        tags: normalizedTags,
-        auto_name,
-        custom_name,
-        is_starred: Boolean(is_starred),
-        expiry_date,
+        original_name, minio_filename, size_bytes, mime_type, category, folder, file_hash,
+        uploaded_by, tags: normalizedTags, auto_name, custom_name, is_starred, expiry_date,
       };
 
       if (exists.rows.length > 0) {
@@ -509,58 +523,43 @@ async function restoreBackup(pool, backupId) {
         const values = [];
         let p = 1;
         for (const [col] of fieldMap) {
-          setParts.push(`${col} = $${p++}`);
+          setParts.push(`${col} = $${p}`);
           values.push(fileValueByCol[col]);
+          p++;
         }
         values.push(fileId);
-
-        await client.query(
-          `UPDATE vault_files
-           SET ${setParts.join(', ')}
-           WHERE id = $${p}`,
-          values
-        );
+        await client.query(`UPDATE vault_files SET ${setParts.join(', ')} WHERE id = $${p}`, values);
       } else {
         const insertCols = ['id', ...fieldMap.map(([col]) => col)];
         const insertValues = [fileId, ...fieldMap.map(([col]) => fileValueByCol[col])];
         const placeholders = insertValues.map((_, idx) => `$${idx + 1}`);
-        await client.query(
-          `INSERT INTO vault_files (${insertCols.join(', ')})
-           VALUES (${placeholders.join(', ')})`,
-          insertValues
-        );
+        await client.query(`INSERT INTO vault_files (${insertCols.join(', ')}) VALUES (${placeholders.join(', ')})`, insertValues);
       }
 
-      if (metadata.company_id == null || metadata.fy_id == null) {
+      if (metadata.masterfolder_id == null && metadata.fy_id == null) {
         await client.query('DELETE FROM vault_file_metadata WHERE file_id = $1', [fileId]);
       } else {
         const metadataUpdate = await client.query(
-          `UPDATE vault_file_metadata
-           SET company_id = $2, fy_id = $3
-           WHERE file_id = $1`,
-          [fileId, metadata.company_id, metadata.fy_id]
+          `UPDATE vault_file_metadata SET masterfolder_id = $2, fy_id = $3 WHERE file_id = $1`,
+          [fileId, metadata.masterfolder_id, metadata.fy_id]
         );
         if (metadataUpdate.rowCount === 0) {
           await client.query(
-            `INSERT INTO vault_file_metadata (file_id, company_id, fy_id)
-             VALUES ($1, $2, $3)`,
-            [fileId, metadata.company_id, metadata.fy_id]
+            `INSERT INTO vault_file_metadata (file_id, masterfolder_id, fy_id) VALUES ($1, $2, $3)`,
+            [fileId, metadata.masterfolder_id, metadata.fy_id]
           );
         }
       }
+      processed++;
+      if (onProgress) onProgress(processed, total, 'db');
     }
 
-    await client.query(
-      `SELECT setval(
-        pg_get_serial_sequence('vault_files', 'id'),
-        COALESCE((SELECT MAX(id) FROM vault_files), 1),
-        true
-      )`
-    );
-
     await client.query('COMMIT');
-    await restoreMinioObjects(backupFolder);
-    await restoreLocalMedia(backupFolder);
+    await restoreMinioObjects(backupFolder, snapshotRecords, onProgress);
+    
+    if (!options.filters || Object.keys(options.filters).length === 0) {
+      await restoreLocalMedia(backupFolder);
+    }
     return { backup_id: backupId, changes: preview };
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});

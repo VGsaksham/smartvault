@@ -24,8 +24,8 @@ export default function AuditLog() {
   const router = useRouter();
   const confirm = useConfirm();
   const searchParams = useSearchParams();
-  const companyId = searchParams.get('companyId');
-  const fyId = searchParams.get('fyId');
+  const masterfolderId = searchParams.get('masterfolderId');
+  const dummyNull = searchParams.get('null');
 
   const fetchLogs = async () => {
     setLoading(true);
@@ -38,8 +38,8 @@ export default function AuditLog() {
       }
 
       const params = new URLSearchParams();
-      if (companyId) params.set('companyId', companyId);
-      if (fyId) params.set('fyId', fyId);
+      if (masterfolderId) params.set('masterfolderId', masterfolderId);
+      
       const endpoint = params.toString() ? `/api/audit?${params.toString()}` : '/api/audit';
       const res = await fetch(apiUrl(endpoint), {
         headers: {
@@ -67,14 +67,14 @@ export default function AuditLog() {
 
   useEffect(() => {
     fetchLogs();
-  }, [companyId, fyId]);
+  }, [masterfolderId]);
 
   const exportLogs = async () => {
     const token = localStorage.getItem('token');
     if (!token) return;
     const params = new URLSearchParams();
-    if (companyId) params.set('companyId', companyId);
-    if (fyId) params.set('fyId', fyId);
+    if (masterfolderId) params.set('masterfolderId', masterfolderId);
+    
     const url = apiUrl(`/api/export/audit-logs${params.toString() ? `?${params.toString()}` : ''}`);
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {

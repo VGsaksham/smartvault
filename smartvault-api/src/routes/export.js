@@ -31,28 +31,28 @@ function parseCsv(text) {
 router.get('/audit-logs', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: "Only Administrators can export system audit logs." });
   try {
-    const companyId = req.query.companyId;
-    const fyId = req.query.fyId;
+    const masterfolderId = req.query.masterfolderId;
+    const dummyNull = req.query.dummyNull;
     let query = `
-      SELECT a.id, a.action_type, u.username, u.email, u.department, a.file_id, a.details, a.ip_address, a.created_at
+      SELECT a.id, a.action_type, u.username, u.email, u.category, a.file_id, a.details, a.ip_address, a.created_at
       FROM audit_logs a
       LEFT JOIN users u ON a.user_id = u.id
     `;
     const values = [];
-    if (companyId && fyId) {
+    if (masterfolderId && null) {
       query += `
         LEFT JOIN vault_files f ON a.file_id = f.id
         LEFT JOIN vault_file_metadata m ON f.id = m.file_id
-        WHERE (m.company_id = $1 AND m.fy_id = $2) OR a.file_id IS NULL
+        WHERE (m.masterfolder_id = $1 ) OR a.file_id IS NULL
       `;
-      values.push(companyId, fyId);
+      values.push(masterfolderId, dummyNull);
     }
     query += ` ORDER BY a.created_at DESC`;
     const { rows } = await pool.query(query, values);
-    let csv = 'ID,Action,User,Email,Department,File ID,Details,IP Address,Timestamp\n';
+    let csv = 'ID,Action,User,Email,Category,File ID,Details,IP Address,Timestamp\n';
     rows.forEach(row => {
       const details = (row.details || '').replace(/"/g, '""');
-      csv += `${row.id},${row.action_type},${row.username || 'System'},${row.email || ''},${row.department || ''},${row.file_id || ''},"${details}",${row.ip_address || ''},${new Date(row.created_at).toISOString()}\n`;
+      csv += `${row.id},${row.action_type},${row.username || 'System'},${row.email || ''},${row.category || ''},${row.file_id || ''},"${details}",${row.ip_address || ''},${new Date(row.created_at).toISOString()}\n`;
     });
     res.header('Content-Type', 'text/csv');
     res.attachment('system_audit_logs.csv');
@@ -60,17 +60,17 @@ router.get('/audit-logs', verifyToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Failed to export audit logs" }); }
 });
 
-router.get('/activity-report/:dept', verifyToken, async (req, res) => {
-  const { dept } = req.params;
-  const { companyId, fyId } = req.query;
-  if (req.user.role !== 'Admin' && req.user.department !== dept) return res.status(403).json({ error: "Access denied" });
+router.get('/activity-report/:category', verifyToken, async (req, res) => {
+  const { category } = req.params;
+  const { masterfolderId, dummyNull } = req.query;
+  if (req.user.role !== 'Admin' && req.user.category !== category) return res.status(403).json({ error: "Access denied" });
   try {
     const { rows } = await pool.query(`
       SELECT a.id, a.action_type, u.username, f.original_name, f.size_bytes, a.details, a.created_at
       FROM audit_logs a JOIN vault_files f ON a.file_id = f.id JOIN vault_file_metadata m ON m.file_id = f.id JOIN users u ON a.user_id = u.id
-      WHERE f.department = $1 ${companyId ? 'AND m.company_id = $2' : ''} ${fyId && companyId ? 'AND m.fy_id = $3' : ''}
+      WHERE f.category = $1 ${masterfolderId ? 'AND m.masterfolder_id = $2' : ''} ${null && masterfolderId ? '' : ''}
       ORDER BY a.created_at DESC
-    `, companyId && fyId ? [dept, companyId, fyId] : companyId ? [dept, companyId] : [dept]);
+    `, masterfolderId && null ? [category, masterfolderId, dummyNull] : masterfolderId ? [category, masterfolderId] : [category]);
     let csv = 'ID,Action,User,File Name,Size (Bytes),Details,Timestamp\n';
     rows.forEach(row => {
       const details = (row.details || '').replace(/"/g, '""');
@@ -78,22 +78,22 @@ router.get('/activity-report/:dept', verifyToken, async (req, res) => {
       csv += `${row.id},${row.action_type},${row.username},"${filename}",${row.size_bytes || 0},"${details}",${new Date(row.created_at).toISOString()}\n`;
     });
     res.header('Content-Type', 'text/csv');
-    res.attachment(`activity_report_${dept}.csv`);
+    res.attachment(`activity_report_${category}.csv`);
     return res.send(csv);
   } catch (err) { res.status(500).json({ error: "Failed to export activity report" }); }
 });
 
 // GET /user-aliases/export/files
 router.get('/user-aliases/export/files', verifyToken, async (req, res) => {
-  const { department, companyId, fyId } = req.query;
+  const { category, masterfolderId, dummyNull } = req.query;
   try {
     const { rows } = await pool.query(`
       SELECT f.id, f.original_name, COALESCE(ufa.alias_name, '') as user_alias
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON m.file_id = f.id
       LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $1
-      WHERE f.department = $2 AND m.company_id = $3 AND m.fy_id = $4
-    `, [req.user.id, department, companyId, fyId]);
+      WHERE f.category = $2 AND m.masterfolder_id = $3 
+    `, [req.user.id, category, masterfolderId, dummyNull]);
     
     let csv = 'File ID,Original Name,My Name\n';
     rows.forEach(row => {
@@ -103,25 +103,25 @@ router.get('/user-aliases/export/files', verifyToken, async (req, res) => {
     });
     
     res.header('Content-Type', 'text/csv');
-    res.attachment(`my_file_names_${department}.csv`);
+    res.attachment(`my_file_names_${category}.csv`);
     return res.send(csv);
   } catch (err) { res.status(500).json({ error: "Failed to export file aliases" }); }
 });
 
 // GET /user-aliases/export/folders
 router.get('/user-aliases/export/folders', verifyToken, async (req, res) => {
-  const { department, companyId, fyId } = req.query;
+  const { category, masterfolderId, dummyNull } = req.query;
   try {
-    const deptRes = await pool.query(`SELECT id FROM company_departments WHERE name = $1 AND company_id = $2 AND fy_id = $3`, [department, companyId, fyId]);
+    const deptRes = await pool.query(`SELECT id FROM masterfolder_categories WHERE name = $1 AND masterfolder_id = $2 `, [category, masterfolderId, dummyNull]);
     if (deptRes.rows.length === 0) return res.send('Folder ID,Folder Path,My Name\n');
-    const deptId = deptRes.rows[0].id;
+    const categoryId = deptRes.rows[0].id;
     
     const { rows } = await pool.query(`
       SELECT f.id, f.parent_folder_id, f.name, COALESCE(ufa.alias_name, '') as user_alias
-      FROM company_department_folders f
+      FROM masterfolder_category_folders f
       LEFT JOIN user_folder_aliases ufa ON ufa.folder_id = f.id AND ufa.user_id = $1
-      WHERE f.department_id = $2
-    `, [req.user.id, deptId]);
+      WHERE f.category_id = $2
+    `, [req.user.id, categoryId]);
     
     const folderMap = new Map(rows.map(r => [r.id, r]));
     const getPath = (id) => {
@@ -140,7 +140,7 @@ router.get('/user-aliases/export/folders', verifyToken, async (req, res) => {
     });
     
     res.header('Content-Type', 'text/csv');
-    res.attachment(`my_folder_names_${department}.csv`);
+    res.attachment(`my_folder_names_${category}.csv`);
     return res.send(csv);
   } catch (err) { res.status(500).json({ error: "Failed to export folder aliases" }); }
 });

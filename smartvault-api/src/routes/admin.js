@@ -5,6 +5,7 @@ const fs = require('fs');
 const { verifyToken } = require('../middleware/auth');
 const env = require('../config/env');
 const { logAction } = require('../services/auditService');
+const backupTracker = require('../services/backupTracker');
 const {
   listBackups,
   createBackupSnapshot,
@@ -13,37 +14,47 @@ const {
   getLatestBackup,
 } = require('../services/backupService');
 
-async function ensureCompanyStructureSchema(db = pool) {
+async function ensuremasterfolderStructureSchema(db = pool) {
   await db.query(`
-    CREATE TABLE IF NOT EXISTS company_departments (
+    CREATE TABLE IF NOT EXISTS masterfolder_categories (
       id SERIAL PRIMARY KEY,
-      company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-      fy_id INTEGER NOT NULL REFERENCES financial_years(id) ON DELETE CASCADE,
+      masterfolder_id INTEGER NOT NULL REFERENCES masterfolders(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
-  await db.query(`CREATE INDEX IF NOT EXISTS idx_company_departments_company_fy ON company_departments(company_id, fy_id);`);
-  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_company_departments_unique_name ON company_departments(company_id, fy_id, LOWER(name));`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_masterfolder_categories_company_fy ON masterfolder_categories(masterfolder_id);`);
+  await db.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_masterfolder_categories_unique_name ON masterfolder_categories(masterfolder_id, LOWER(name));`);
 
   await db.query(`
-    CREATE TABLE IF NOT EXISTS company_department_folders (
+    CREATE TABLE IF NOT EXISTS masterfolder_category_folders (
       id SERIAL PRIMARY KEY,
-      department_id INTEGER NOT NULL REFERENCES company_departments(id) ON DELETE CASCADE,
-      parent_folder_id INTEGER REFERENCES company_department_folders(id) ON DELETE CASCADE,
+      category_id INTEGER NOT NULL REFERENCES masterfolder_categories(id) ON DELETE CASCADE,
+      parent_folder_id INTEGER REFERENCES masterfolder_category_folders(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
   `);
+  
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS starred_folders (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      folder_id INTEGER NOT NULL REFERENCES masterfolder_category_folders(id) ON DELETE CASCADE,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, folder_id)
+    );
+  `);
+
   // Add parent_folder_id column if it doesn't exist (migration for existing installs)
   await db.query(`
-    ALTER TABLE company_department_folders
-    ADD COLUMN IF NOT EXISTS parent_folder_id INTEGER REFERENCES company_department_folders(id) ON DELETE CASCADE;
+    ALTER TABLE masterfolder_category_folders
+    ADD COLUMN IF NOT EXISTS parent_folder_id INTEGER REFERENCES masterfolder_category_folders(id) ON DELETE CASCADE;
   `).catch(() => {});
-  await db.query(`CREATE INDEX IF NOT EXISTS idx_company_department_folders_dept ON company_department_folders(department_id);`);
-  await db.query(`CREATE INDEX IF NOT EXISTS idx_company_department_folders_parent ON company_department_folders(parent_folder_id);`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_masterfolder_category_folders_dept ON masterfolder_category_folders(category_id);`);
+  await db.query(`CREATE INDEX IF NOT EXISTS idx_masterfolder_category_folders_parent ON masterfolder_category_folders(parent_folder_id);`);
 }
 
 // Build full path string for a folder by walking ancestors
@@ -54,7 +65,7 @@ async function getFolderFullPath(db, folderId) {
   while (currentId) {
     if (visited.has(currentId)) break; // cycle guard
     visited.add(currentId);
-    const r = await db.query(`SELECT id, name, parent_folder_id FROM company_department_folders WHERE id = $1`, [currentId]);
+    const r = await db.query(`SELECT id, name, parent_folder_id FROM masterfolder_category_folders WHERE id = $1`, [currentId]);
     if (r.rows.length === 0) break;
     parts.unshift(r.rows[0].name);
     currentId = r.rows[0].parent_folder_id;
@@ -79,40 +90,45 @@ function bad(res, msg) {
 }
 
 router.get('/structure', verifyToken, async (req, res) => {
-  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
-  const companyId = Number(req.query.companyId);
-  const fyId = Number(req.query.fyId);
-  if (!Number.isFinite(companyId) || !Number.isFinite(fyId)) return bad(res, 'companyId and fyId are required.');
+  if (req.user.role !== 'Admin' && !req.user.can_manage_structure) return res.status(403).json({ error: 'Permission denied.' });
+  const masterfolderId = Number(req.query.masterfolderId);
+    if (!Number.isFinite(masterfolderId) ) return bad(res, 'masterfolderId is required.');
   try {
-    await ensureCompanyStructureSchema(pool);
+    await ensuremasterfolderStructureSchema(pool);
     const deptRows = await pool.query(
-      `SELECT id, name FROM company_departments
-       WHERE company_id = $1 AND fy_id = $2
+      `SELECT id, name FROM masterfolder_categories
+       WHERE masterfolder_id = $1 
        ORDER BY LOWER(name) ASC`,
-      [companyId, fyId]
+      [masterfolderId]
     );
-    const deptIds = deptRows.rows.map((d) => d.id);
-    const folderRows = deptIds.length > 0
+    const categoryIds = deptRows.rows.map((d) => d.id);
+    const folderRows = categoryIds.length > 0
       ? await pool.query(
-          `SELECT id, department_id, parent_folder_id, name FROM company_department_folders
-           WHERE department_id = ANY($1::int[])
-           ORDER BY LOWER(name) ASC`,
-          [deptIds]
+          `SELECT f.id, f.category_id, f.parent_folder_id, f.name, (s.id IS NOT NULL) as starred 
+           FROM masterfolder_category_folders f
+           LEFT JOIN starred_folders s ON s.folder_id = f.id AND s.user_id = $2
+           WHERE f.category_id = ANY($1::int[])
+           ORDER BY LOWER(f.name) ASC`,
+          [categoryIds, req.user.id]
         ).catch(() => ({ rows: [] }))
       : { rows: [] };
     const byDept = new Map();
     for (const f of folderRows.rows) {
-      if (!byDept.has(f.department_id)) byDept.set(f.department_id, []);
-      byDept.get(f.department_id).push(f);
+      if (!byDept.has(f.category_id)) byDept.set(f.category_id, []);
+      byDept.get(f.category_id).push(f);
     }
     res.json({
-      company_id: companyId,
-      fy_id: fyId,
-      departments: deptRows.rows.map((d) => ({
+      masterfolder_id: masterfolderId,
+      categories: deptRows.rows.map((d) => ({
         id: d.id,
         name: d.name,
         // flat list of all folders (frontend builds tree)
-        folders: (byDept.get(d.id) || []).map(f => ({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null })),
+        folders: (byDept.get(d.id) || []).map(f => ({ 
+          id: f.id, 
+          name: f.name, 
+          parent_folder_id: f.parent_folder_id || null,
+          starred: !!f.starred
+        })),
       })),
     });
   } catch (err) {
@@ -121,20 +137,20 @@ router.get('/structure', verifyToken, async (req, res) => {
 });
 
 router.get('/folders', verifyToken, async (req, res) => {
-  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
-  const companyId = Number(req.query.companyId);
-  const departmentName = String(req.query.department || '').trim();
-  if (!Number.isFinite(companyId) || !departmentName) return bad(res, 'companyId and department are required.');
+  if (req.user.role !== 'Admin' && !req.user.can_manage_structure) return res.status(403).json({ error: 'Permission denied.' });
+  const masterfolderId = Number(req.query.masterfolderId);
+  const categoryName = String(req.query.category || '').trim();
+  if (!Number.isFinite(masterfolderId) || !categoryName) return bad(res, 'masterfolderId and category are required.');
   try {
     const deptRes = await pool.query(
-      `SELECT id FROM company_departments WHERE company_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
-      [companyId, departmentName]
+      `SELECT id FROM masterfolder_categories WHERE masterfolder_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+      [masterfolderId, categoryName]
     );
     if (deptRes.rows.length === 0) return res.json([]);
-    const deptId = deptRes.rows[0].id;
+    const categoryId = deptRes.rows[0].id;
     const folderRows = await pool.query(
-      `SELECT id FROM company_department_folders WHERE department_id = $1`,
-      [deptId]
+      `SELECT id FROM masterfolder_category_folders WHERE category_id = $1`,
+      [categoryId]
     );
     const paths = await Promise.all(folderRows.rows.map(r => getFolderFullPath(pool, r.id)));
     paths.sort((a, b) => a.localeCompare(b));
@@ -144,127 +160,125 @@ router.get('/folders', verifyToken, async (req, res) => {
   }
 });
 
-router.post('/structure/departments', verifyToken, async (req, res) => {
-  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
-  const companyId = Number(req.body.company_id);
-  const fyId = Number(req.body.fy_id);
-  const name = String(req.body.name || '').trim();
-  if (!Number.isFinite(companyId) || !Number.isFinite(fyId) || !name) return bad(res, 'company_id, fy_id, and name are required.');
+router.post('/structure/categories', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin' && !req.user.can_manage_structure) return res.status(403).json({ error: 'Permission denied.' });
+  const masterfolderId = Number(req.body.masterfolder_id);
+    const name = String(req.body.name || '').trim();
+  if (!Number.isFinite(masterfolderId)  || !name) return bad(res, 'masterfolder_id, and name are required.');
   try {
-    await ensureCompanyStructureSchema(pool);
+    await ensuremasterfolderStructureSchema(pool);
     const created = await pool.query(
-      `INSERT INTO company_departments (company_id, fy_id, name)
-       VALUES ($1, $2, $3)
+      `INSERT INTO masterfolder_categories (masterfolder_id, name)
+       VALUES ($1, $2)
        RETURNING id, name`,
-      [companyId, fyId, name]
+      [masterfolderId, name]
     );
-    res.json({ success: true, department: created.rows[0] });
+    res.json({ success: true, category: created.rows[0] });
   } catch (err) {
     const msg = String(err.message || '');
     const status = msg.includes('unique') ? 409 : 500;
-    res.status(status).json({ error: `Failed to create department: ${err.message}` });
+    res.status(status).json({ error: `Failed to create category: ${err.message}` });
   }
 });
 
-router.put('/structure/departments/:id', verifyToken, async (req, res) => {
-  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
-  const deptId = Number(req.params.id);
+router.put('/structure/categories/:id', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin' && !req.user.can_manage_structure) return res.status(403).json({ error: 'Permission denied.' });
+  const categoryId = Number(req.params.id);
   const name = String(req.body.name || '').trim();
-  if (!Number.isFinite(deptId) || !name) return bad(res, 'name is required.');
+  if (!Number.isFinite(categoryId) || !name) return bad(res, 'name is required.');
   const client = await pool.connect();
   try {
-    await ensureCompanyStructureSchema(client);
+    await ensuremasterfolderStructureSchema(client);
     await client.query('BEGIN');
     const deptRes = await client.query(
-      `SELECT id, company_id, fy_id, name FROM company_departments WHERE id = $1 LIMIT 1`,
-      [deptId]
+      `SELECT id, masterfolder_id, name FROM masterfolder_categories WHERE id = $1 LIMIT 1`,
+      [categoryId]
     );
     if (deptRes.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Department not found.' });
+      return res.status(404).json({ error: 'Category not found.' });
     }
-    const dept = deptRes.rows[0];
-    const oldName = dept.name;
+    const category = deptRes.rows[0];
+    const oldName = category.name;
 
     await client.query(
-      `UPDATE company_departments SET name = $1, updated_at = NOW() WHERE id = $2`,
-      [name, deptId]
+      `UPDATE masterfolder_categories SET name = $1, updated_at = NOW() WHERE id = $2`,
+      [name, categoryId]
     );
 
-    // Propagate rename to existing files (department stored as text).
+    // Propagate rename to existing files (category stored as text).
     await client.query(
       `UPDATE vault_files f
-       SET department = $1
+       SET category = $1
        FROM vault_file_metadata m
        WHERE m.file_id = f.id
-         AND m.company_id = $2
-         AND m.fy_id = $3
-         AND f.department = $4`,
-      [name, dept.company_id, dept.fy_id, oldName]
+         AND m.masterfolder_id = $2
+         AND f.category = $3`,
+      [name, category.masterfolder_id, oldName]
     );
 
     await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).json({ error: `Failed to update department: ${err.message}` });
+    res.status(500).json({ error: `Failed to update category: ${err.message}` });
   } finally {
     client.release();
   }
 });
 
-router.delete('/structure/departments/:id', verifyToken, async (req, res) => {
+router.delete('/structure/categories/:id', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
-  const deptId = Number(req.params.id);
-  if (!Number.isFinite(deptId)) return bad(res, 'Invalid department id.');
+  const categoryId = Number(req.params.id);
+  if (!Number.isFinite(categoryId)) return bad(res, 'Invalid category id.');
   const client = await pool.connect();
   try {
-    await ensureCompanyStructureSchema(client);
+    await ensuremasterfolderStructureSchema(client);
     await client.query('BEGIN');
     const deptRes = await client.query(
-      `SELECT id, company_id, fy_id, name FROM company_departments WHERE id = $1 LIMIT 1`,
-      [deptId]
+      `SELECT id, masterfolder_id, name FROM masterfolder_categories WHERE id = $1 LIMIT 1`,
+      [categoryId]
     );
     if (deptRes.rows.length === 0) {
       await client.query('ROLLBACK');
-      return res.status(404).json({ error: 'Department not found.' });
+      return res.status(404).json({ error: 'Category not found.' });
     }
-    const dept = deptRes.rows[0];
+    const category = deptRes.rows[0];
     const countRes = await client.query(
       `SELECT COUNT(*)::int AS n
        FROM vault_files f
        JOIN vault_file_metadata m ON m.file_id = f.id
-       WHERE m.company_id = $1 AND m.fy_id = $2 AND f.department = $3`,
-      [dept.company_id, dept.fy_id, dept.name]
+       WHERE m.masterfolder_id = $1 AND f.category = $2`,
+      [category.masterfolder_id, category.name]
     );
     if ((countRes.rows[0]?.n || 0) > 0) {
       await client.query('ROLLBACK');
-      return res.status(409).json({ error: 'Cannot delete department: files exist in this department.' });
+      return res.status(409).json({ error: 'Cannot delete category: files exist in this category.' });
     }
-    await client.query(`DELETE FROM company_departments WHERE id = $1`, [deptId]);
+    await client.query(`DELETE FROM masterfolder_categories WHERE id = $1`, [categoryId]);
     await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
     await client.query('ROLLBACK');
-    res.status(500).json({ error: `Failed to delete department: ${err.message}` });
+    res.status(500).json({ error: `Failed to delete category: ${err.message}` });
   } finally {
     client.release();
   }
 });
 
-router.post('/structure/departments/:id/folders', verifyToken, async (req, res) => {
-  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
-  const deptId = Number(req.params.id);
+router.post('/structure/categories/:id/folders', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin' && !req.user.can_manage_structure) return res.status(403).json({ error: 'Permission denied.' });
+  const categoryId = Number(req.params.id);
   const name = String(req.body.name || '').trim();
   const parentFolderId = req.body.parent_folder_id ? Number(req.body.parent_folder_id) : null;
-  if (!Number.isFinite(deptId) || !name) return bad(res, 'name is required.');
+  if (!Number.isFinite(categoryId) || !name) return bad(res, 'name is required.');
   try {
-    await ensureCompanyStructureSchema(pool);
+    await ensuremasterfolderStructureSchema(pool);
     const created = await pool.query(
-      `INSERT INTO company_department_folders (department_id, parent_folder_id, name)
+      `INSERT INTO masterfolder_category_folders (category_id, parent_folder_id, name)
        VALUES ($1, $2, $3)
        RETURNING id, name, parent_folder_id`,
-      [deptId, parentFolderId, name]
+      [categoryId, parentFolderId, name]
     );
     res.json({ success: true, folder: created.rows[0] });
   } catch (err) {
@@ -279,24 +293,24 @@ router.post('/structure/departments/:id/folders', verifyToken, async (req, res) 
 
 // Create subfolder inside an existing folder
 router.post('/structure/folders/:id/subfolders', verifyToken, async (req, res) => {
-  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
+  if (req.user.role !== 'Admin' && !req.user.can_manage_structure) return res.status(403).json({ error: 'Permission denied.' });
   const parentFolderId = Number(req.params.id);
   const name = String(req.body.name || '').trim();
   if (!Number.isFinite(parentFolderId) || !name) return bad(res, 'name is required.');
   try {
-    await ensureCompanyStructureSchema(pool);
-    // Get parent folder to inherit department_id
+    await ensuremasterfolderStructureSchema(pool);
+    // Get parent folder to inherit category_id
     const parentRes = await pool.query(
-      `SELECT id, department_id FROM company_department_folders WHERE id = $1 LIMIT 1`,
+      `SELECT id, category_id FROM masterfolder_category_folders WHERE id = $1 LIMIT 1`,
       [parentFolderId]
     );
     if (parentRes.rows.length === 0) return res.status(404).json({ error: 'Parent folder not found.' });
-    const deptId = parentRes.rows[0].department_id;
+    const categoryId = parentRes.rows[0].category_id;
     const created = await pool.query(
-      `INSERT INTO company_department_folders (department_id, parent_folder_id, name)
+      `INSERT INTO masterfolder_category_folders (category_id, parent_folder_id, name)
        VALUES ($1, $2, $3)
        RETURNING id, name, parent_folder_id`,
-      [deptId, parentFolderId, name]
+      [categoryId, parentFolderId, name]
     );
     res.json({ success: true, folder: created.rows[0] });
   } catch (err) {
@@ -310,18 +324,18 @@ router.post('/structure/folders/:id/subfolders', verifyToken, async (req, res) =
 });
 
 router.put('/structure/folders/:id', verifyToken, async (req, res) => {
-  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
+  if (req.user.role !== 'Admin' && !req.user.can_manage_structure) return res.status(403).json({ error: 'Permission denied.' });
   const folderId = Number(req.params.id);
   const name = String(req.body.name || '').trim();
   if (!Number.isFinite(folderId) || !name) return bad(res, 'name is required.');
   const client = await pool.connect();
   try {
-    await ensureCompanyStructureSchema(client);
+    await ensuremasterfolderStructureSchema(client);
     await client.query('BEGIN');
     const fRes = await client.query(
-      `SELECT f.id, f.department_id, f.name, f.parent_folder_id, d.company_id, d.fy_id, d.name AS dept_name
-       FROM company_department_folders f
-       JOIN company_departments d ON d.id = f.department_id
+      `SELECT f.id, f.category_id, f.name, f.parent_folder_id, d.masterfolder_id, d.name AS dept_name
+       FROM masterfolder_category_folders f
+       JOIN masterfolder_categories d ON d.id = f.category_id
        WHERE f.id = $1
        LIMIT 1`,
       [folderId]
@@ -335,7 +349,7 @@ router.put('/structure/folders/:id', verifyToken, async (req, res) => {
     const oldFullPath = await getFolderFullPath(client, folderId);
 
     await client.query(
-      `UPDATE company_department_folders SET name = $1, updated_at = NOW() WHERE id = $2`,
+      `UPDATE masterfolder_category_folders SET name = $1, updated_at = NOW() WHERE id = $2`,
       [name, folderId]
     );
 
@@ -348,23 +362,21 @@ router.put('/structure/folders/:id', verifyToken, async (req, res) => {
        SET folder = $1
        FROM vault_file_metadata m
        WHERE m.file_id = f.id
-         AND m.company_id = $2
-         AND m.fy_id = $3
-         AND f.department = $4
-         AND COALESCE(f.folder, '') = $5`,
-      [newFullPath, row.company_id, row.fy_id, row.dept_name, oldFullPath]
+         AND m.masterfolder_id = $2
+         AND f.category = $3
+         AND COALESCE(f.folder, '') = $4`,
+      [newFullPath, row.masterfolder_id, row.dept_name, oldFullPath]
     );
     // Also update files in subfolders (path starts with oldFullPath/)
     await client.query(
       `UPDATE vault_files f
-       SET folder = $1 || SUBSTRING(COALESCE(f.folder, ''), LENGTH($5) + 1)
+       SET folder = $1 || SUBSTRING(COALESCE(f.folder, ''), LENGTH($4) + 1)
        FROM vault_file_metadata m
        WHERE m.file_id = f.id
-         AND m.company_id = $2
-         AND m.fy_id = $3
-         AND f.department = $4
-         AND COALESCE(f.folder, '') LIKE $5 || '/%'`,
-      [newFullPath, row.company_id, row.fy_id, row.dept_name, oldFullPath]
+         AND m.masterfolder_id = $2
+         AND f.category = $3
+         AND COALESCE(f.folder, '') LIKE $4 || '/%'`,
+      [newFullPath, row.masterfolder_id, row.dept_name, oldFullPath]
     );
 
     await client.query('COMMIT');
@@ -383,12 +395,12 @@ router.delete('/structure/folders/:id', verifyToken, async (req, res) => {
   if (!Number.isFinite(folderId)) return bad(res, 'Invalid folder id.');
   const client = await pool.connect();
   try {
-    await ensureCompanyStructureSchema(client);
+    await ensuremasterfolderStructureSchema(client);
     await client.query('BEGIN');
     const fRes = await client.query(
-      `SELECT f.id, f.name, f.parent_folder_id, d.company_id, d.fy_id, d.name AS dept_name
-       FROM company_department_folders f
-       JOIN company_departments d ON d.id = f.department_id
+      `SELECT f.id, f.name, f.parent_folder_id, d.masterfolder_id, d.name AS dept_name
+       FROM masterfolder_category_folders f
+       JOIN masterfolder_categories d ON d.id = f.category_id
        WHERE f.id = $1
        LIMIT 1`,
       [folderId]
@@ -404,16 +416,16 @@ router.delete('/structure/folders/:id', verifyToken, async (req, res) => {
       `SELECT COUNT(*)::int AS n
        FROM vault_files f
        JOIN vault_file_metadata m ON m.file_id = f.id
-       WHERE m.company_id = $1 AND m.fy_id = $2 AND f.department = $3
-         AND (COALESCE(f.folder, '') = $4 OR COALESCE(f.folder, '') LIKE $4 || '/%')`,
-      [row.company_id, row.fy_id, row.dept_name, fullPath]
+       WHERE m.masterfolder_id = $1 AND f.category = $2
+         AND (COALESCE(f.folder, '') = $3 OR COALESCE(f.folder, '') LIKE $3 || '/%')`,
+      [row.masterfolder_id, row.dept_name, fullPath]
     );
     if ((countRes.rows[0]?.n || 0) > 0) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Cannot delete folder: files exist in this folder or its subfolders.' });
     }
     // Cascade delete will remove child folders via ON DELETE CASCADE
-    await client.query(`DELETE FROM company_department_folders WHERE id = $1`, [folderId]);
+    await client.query(`DELETE FROM masterfolder_category_folders WHERE id = $1`, [folderId]);
     await client.query('COMMIT');
     res.json({ success: true });
   } catch (err) {
@@ -492,7 +504,7 @@ router.get('/duplicates', verifyToken, async (req, res) => {
   try {
     const query = `
       SELECT f1.file_hash, COUNT(f1.id) as duplicate_count, SUM(f1.size_bytes) - MAX(f1.size_bytes) as total_size_wasted,
-      json_agg(json_build_object('id', f1.id, 'original_name', f1.original_name, 'department', f1.department, 'folder', f1.folder, 'size_bytes', f1.size_bytes, 'upload_date', f1.upload_date, 'uploader_name', u.username)) as files
+      json_agg(json_build_object('id', f1.id, 'original_name', f1.original_name, 'category', f1.category, 'folder', f1.folder, 'size_bytes', f1.size_bytes, 'upload_date', f1.upload_date, 'uploader_name', u.username)) as files
       FROM vault_files f1 LEFT JOIN users u ON f1.uploaded_by = u.id GROUP BY f1.file_hash HAVING COUNT(f1.id) > 1 ORDER BY total_size_wasted DESC;
     `;
     const { rows } = await pool.query(query);
@@ -503,8 +515,8 @@ router.get('/duplicates', verifyToken, async (req, res) => {
 router.get('/dashboard', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Only Administrators can access the admin dashboard.' });
 
-  const { companyId, fyId } = req.query;
-  const hasFilter = companyId && fyId;
+  const { masterfolderId } = req.query;
+  const hasFilter = !!masterfolderId;
 
   try {
     // System health: always global (server-level metrics)
@@ -521,62 +533,62 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         LEFT JOIN users u ON a.user_id = u.id
         LEFT JOIN vault_files f ON a.file_id = f.id
         LEFT JOIN vault_file_metadata m ON m.file_id = f.id
-        WHERE (m.company_id = $1 AND m.fy_id = $2) OR a.file_id IS NULL
+        WHERE m.masterfolder_id = $1 OR a.file_id IS NULL
         ORDER BY a.id, a.created_at DESC
         LIMIT 10
-      `, [companyId, fyId]);
+      `, [masterfolderId]);
     } else {
       auditLogs = await pool.query(`SELECT a.*, u.username FROM audit_logs a LEFT JOIN users u ON a.user_id = u.id ORDER BY a.created_at DESC LIMIT 10`);
     }
 
-    // Company + FY overview: always global, but highlight the selected one
-    const companyFyOverview = await pool.query(`SELECT c.id as company_id, c.name as company_name, fy.id as fy_id, fy.name as fy_name, COUNT(f.id) as total_files, SUM(f.size_bytes) as total_size FROM vault_file_metadata m JOIN companies c ON m.company_id = c.id JOIN financial_years fy ON m.fy_id = fy.id JOIN vault_files f ON m.file_id = f.id GROUP BY c.id, c.name, fy.id, fy.name ORDER BY c.name, fy.name DESC`);
+    // masterfolder overview: always global, but highlight the selected one
+    const companyFyOverview = await pool.query(`SELECT m_table.id as masterfolder_id, m_table.name as masterfolder_name, COUNT(f.id) as total_files, SUM(f.size_bytes) as total_size FROM vault_file_metadata m JOIN masterfolders m_table ON m.masterfolder_id = m_table.id JOIN vault_files f ON m.file_id = f.id GROUP BY m_table.id, m_table.name ORDER BY m_table.name DESC`);
 
-    // Department overview: filtered by company+FY if provided
+    // Category overview: filtered by company+FY if provided
     let deptOverview;
     if (hasFilter) {
       deptOverview = await pool.query(`
-        SELECT f.department, COUNT(f.id) as total_files, SUM(f.size_bytes) as total_size
+        SELECT f.category, COUNT(f.id) as total_files, SUM(f.size_bytes) as total_size
         FROM vault_files f
         JOIN vault_file_metadata m ON m.file_id = f.id
-        WHERE m.company_id = $1 AND m.fy_id = $2
-        GROUP BY f.department ORDER BY total_size DESC NULLS LAST
-      `, [companyId, fyId]);
+        WHERE m.masterfolder_id = $1
+        GROUP BY f.category ORDER BY total_size DESC NULLS LAST
+      `, [masterfolderId]);
     } else {
-      deptOverview = await pool.query(`SELECT department, COUNT(id) as total_files, SUM(size_bytes) as total_size FROM vault_files GROUP BY department ORDER BY total_size DESC NULLS LAST`);
+      deptOverview = await pool.query(`SELECT category, COUNT(id) as total_files, SUM(size_bytes) as total_size FROM vault_files GROUP BY category ORDER BY total_size DESC NULLS LAST`);
     }
 
-    const activeUsers = await pool.query(`SELECT id, username, role, department FROM users WHERE status = 'Active' ORDER BY username ASC`);
+    const activeUsers = await pool.query(`SELECT id, username, role, category FROM users WHERE status = 'Active' ORDER BY username ASC`);
 
     const latestBackup = await getLatestBackup().catch(() => null);
 
     let companyStorage = null;
-    if (companyId) {
+    if (masterfolderId) {
       const companySizeResult = await pool.query(
         `SELECT COALESCE(SUM(f.size_bytes), 0) AS total_size
          FROM vault_files f
          JOIN vault_file_metadata m ON m.file_id = f.id
-         WHERE m.company_id = $1 ${fyId ? 'AND m.fy_id = $2' : ''}`,
-        fyId ? [companyId, fyId] : [companyId]
+         WHERE m.masterfolder_id = $1`,
+        [masterfolderId]
       );
       const companyMeta = await pool.query(
-        `SELECT id, name, storage_quota_gb
-         FROM companies
+        `SELECT id, name
+         FROM masterfolders
          WHERE id = $1
          LIMIT 1`,
-        [companyId]
+        [masterfolderId]
       );
       if (companyMeta.rows.length > 0) {
-        const quotaGb = Number(companyMeta.rows[0].storage_quota_gb || 0);
+        const quotaGb = 5;
         const usedBytes = Number(companySizeResult.rows[0]?.total_size || 0);
         const quotaBytes = quotaGb > 0 ? quotaGb * 1024 * 1024 * 1024 : 0;
         companyStorage = {
-          company_id: Number(companyMeta.rows[0].id),
-          company_name: companyMeta.rows[0].name,
+          masterfolder_id: Number(companyMeta.rows[0].id),
+          masterfolder_name: companyMeta.rows[0].name,
           quota_gb: quotaGb,
           used_bytes: usedBytes,
           usage_percent: quotaBytes > 0 ? Number(((usedBytes / quotaBytes) * 100).toFixed(1)) : null,
-          scoped_to_fy: Boolean(fyId),
+          scoped_to_fy: false,
         };
       }
     }
@@ -595,7 +607,7 @@ router.get('/dashboard', verifyToken, async (req, res) => {
         status: "Healthy"
       },
       active_users: activeUsers.rows,
-      departments: deptOverview.rows.map(r => ({ department: r.department, total_files: parseInt(r.total_files) || 0, total_size: parseInt(r.total_size) || 0 })),
+      categories: deptOverview.rows.map(r => ({ category: r.category, total_files: parseInt(r.total_files) || 0, total_size: parseInt(r.total_size) || 0 })),
       duplicates: { pairs: parseInt(duplicateSummary.rows[0]?.duplicate_pairs) || 0, wasted_size: parseInt(duplicateSummary.rows[0]?.total_size_wasted) || 0 },
       recent_audit: auditLogs.rows,
       company_fy_overview: companyFyOverview.rows.map(r => ({ ...r, total_files: parseInt(r.total_files)||0, total_size: parseInt(r.total_size)||0 }))
@@ -644,47 +656,97 @@ router.get('/backups/config', verifyToken, async (req, res) => {
   });
 });
 
+
 router.post('/backups', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
   try {
-    const snapshot = await createBackupSnapshot(pool, { userId: req.user.id, reason: 'manual' });
-    await logAction(req.user.id, 'BACKUP_CREATE', null, `Created backup ${snapshot.backup_id}`, req.ip);
-    res.json({ success: true, backup: snapshot });
+    const filters = req.body?.filters || {};
+    const jobId = backupTracker.createJob('backup', req.user.id);
+    
+    // Fire and forget
+    createBackupSnapshot(pool, { userId: req.user.id, reason: 'manual', filters }, (processed, total) => {
+      backupTracker.updateJobProgress(jobId, processed, total, 'minio objects');
+    })
+      .then(snapshot => {
+        backupTracker.completeJob(jobId, snapshot);
+        logAction(req.user.id, 'BACKUP_CREATE', null, `Created backup ${snapshot.backup_id}`, req.ip).catch(() => {});
+      })
+      .catch(err => {
+        console.error('Manual backup failed:', err);
+        backupTracker.failJob(jobId, err);
+      });
+      
+    res.json({ success: true, job_id: jobId });
   } catch (err) {
-    console.error('Manual backup failed:', err.message);
-    const code = String(err?.code || '');
-    if (code === 'STORAGE_UNAVAILABLE') {
-      return res.status(503).json({ error: err.message });
-    }
-    res.status(500).json({ error: 'Failed to create backup.' });
+    res.status(500).json({ error: 'Failed to start backup.' });
   }
 });
 
-router.get('/backups/:backupId/preview', verifyToken, async (req, res) => {
+router.get('/backups/status/:jobId', verifyToken, (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
+  const status = backupTracker.getJobStatus(req.params.jobId);
+  if (!status) return res.status(404).json({ error: 'Job not found.' });
+  res.json({ success: true, status });
+});
+
+router.post('/backups/preview', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
+  const backupId = req.body?.backupId;
+  const filters = req.body?.filters || {};
+  if (!backupId) return res.status(400).json({ error: 'backupId required.' });
   try {
-    const preview = await getBackupPreview(pool, req.params.backupId);
-    res.json(preview);
+    const preview = await getBackupPreview(pool, backupId, { filters });
+    res.json({ success: true, preview });
   } catch (err) {
-    const status = String(err.message || '').includes('Invalid backup id') ? 400 : 500;
-    res.status(status).json({ error: 'Failed to preview backup.' });
+    res.status(500).json({ error: 'Failed to generate preview.' });
   }
 });
 
-router.post('/backups/:backupId/restore', verifyToken, async (req, res) => {
+router.post('/backups/restore', verifyToken, async (req, res) => {
+  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
+  const backupId = req.body?.backupId;
+  const filters = req.body?.filters || {};
+  if (!backupId) return res.status(400).json({ error: 'backupId required.' });
+
+  try {
+    const jobId = backupTracker.createJob('restore', req.user.id);
+    
+    // Fire and forget
+    restoreBackup(pool, backupId, { filters }, (processed, total, stage) => {
+      backupTracker.updateJobProgress(jobId, processed, total, stage);
+    })
+      .then(result => {
+        backupTracker.completeJob(jobId, result);
+        logAction(req.user.id, 'BACKUP_RESTORE', null, `Restored backup ${result.backup_id}`, req.ip).catch(() => {});
+      })
+      .catch(err => {
+        console.error('Restore failed:', err);
+        backupTracker.failJob(jobId, err);
+      });
+
+    res.json({ success: true, job_id: jobId });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to start restore.' });
+  }
+});
+
+
+router.post('/backup-schedule', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
   try {
-    const restored = await restoreBackup(pool, req.params.backupId);
-    await logAction(req.user.id, 'BACKUP_RESTORE', null, `Restored backup ${req.params.backupId}`, req.ip);
-    res.json({ success: true, restore: restored });
+    const { enabled, interval } = req.body;
+    let cron = '0 2 * * *'; // default daily at 2AM
+    if (interval === 'Weekly') cron = '0 2 * * 0'; // Sunday 2AM
+    else if (interval === 'Monthly') cron = '0 2 1 * *'; // 1st of month 2AM
+    else if (interval === 'Quarterly') cron = '0 2 1 */3 *'; // 1st of every 3 months 2AM
+    
+    // Write this to a config file for server.js to pick up, or env.json
+    const configPath = require('path').join(__dirname, '../../../backup_config.json');
+    require('fs').writeFileSync(configPath, JSON.stringify({ enabled, interval, cron }, null, 2));
+    
+    res.json({ success: true, enabled, interval, cron });
   } catch (err) {
-    console.error('Backup restore failed:', err.message);
-    const status = String(err.message || '').includes('Invalid backup id') ? 400 : 500;
-    const code = String(err?.code || '');
-    if (code === 'STORAGE_UNAVAILABLE') {
-      return res.status(503).json({ error: err.message });
-    }
-    res.status(status).json({ error: `Failed to restore backup: ${err.message}` });
+    res.status(500).json({ error: 'Failed to save schedule.' });
   }
 });
 

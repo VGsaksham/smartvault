@@ -3,24 +3,11 @@ CREATE SCHEMA public;
 GRANT ALL ON SCHEMA public TO vaultadmin;
 GRANT ALL ON SCHEMA public TO public;
 
-CREATE TABLE companies (
+CREATE TABLE masterfolders (
     id SERIAL PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    type VARCHAR(50) DEFAULT 'Independent',
-    parent_company_id INTEGER REFERENCES companies(id),
-    storage_quota_gb INTEGER DEFAULT 0
+    name VARCHAR(255) NOT NULL
 );
-ALTER TABLE companies OWNER TO vaultadmin;
-
-CREATE TABLE financial_years (
-    id SERIAL PRIMARY KEY,
-    company_id INTEGER REFERENCES companies(id),
-    name VARCHAR(50) NOT NULL,
-    start_date DATE NOT NULL,
-    end_date DATE NOT NULL,
-    status VARCHAR(20) DEFAULT 'Active'
-);
-ALTER TABLE financial_years OWNER TO vaultadmin;
+ALTER TABLE masterfolders OWNER TO vaultadmin;
 
 CREATE TABLE users (
     id SERIAL PRIMARY KEY,
@@ -28,8 +15,8 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     role VARCHAR(50) DEFAULT 'Staff',
-    department VARCHAR(100),
-    allowed_departments TEXT[] DEFAULT ARRAY[]::TEXT[],
+    category VARCHAR(100),
+    allowed_categories TEXT[] DEFAULT ARRAY[]::TEXT[],
     can_bulk_move BOOLEAN DEFAULT true,
     can_bulk_copy BOOLEAN DEFAULT true,
     can_bulk_delete BOOLEAN DEFAULT false,
@@ -50,7 +37,7 @@ CREATE TABLE vault_files (
     minio_filename VARCHAR(500) NOT NULL,
     size_bytes BIGINT NOT NULL,
     mime_type VARCHAR(255),
-    department VARCHAR(100),
+    category VARCHAR(100),
     folder VARCHAR(255),
     file_hash VARCHAR(255),
     uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -62,36 +49,35 @@ CREATE TABLE vault_files (
 );
 ALTER TABLE vault_files OWNER TO vaultadmin;
 
-CREATE TABLE user_company_access (
+CREATE TABLE user_masterfolder_access (
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
-    department VARCHAR(100),
+    masterfolder_id INTEGER REFERENCES masterfolders(id) ON DELETE CASCADE,
+    category VARCHAR(100),
     can_upload BOOLEAN DEFAULT false,
     is_primary BOOLEAN DEFAULT false,
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW(),
-    PRIMARY KEY (user_id, company_id)
+    PRIMARY KEY (user_id, masterfolder_id)
 );
-ALTER TABLE user_company_access OWNER TO vaultadmin;
+ALTER TABLE user_masterfolder_access OWNER TO vaultadmin;
 
 CREATE TABLE vault_user_metadata (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE
+    masterfolder_id INTEGER REFERENCES masterfolders(id) ON DELETE CASCADE
 );
 ALTER TABLE vault_user_metadata OWNER TO vaultadmin;
 
 CREATE TABLE vault_file_metadata (
     file_id INTEGER PRIMARY KEY REFERENCES vault_files(id) ON DELETE CASCADE,
-    company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
-    fy_id INTEGER REFERENCES financial_years(id) ON DELETE CASCADE
+    masterfolder_id INTEGER REFERENCES masterfolders(id) ON DELETE CASCADE
 );
 ALTER TABLE vault_file_metadata OWNER TO vaultadmin;
 
 CREATE TABLE file_sequences (
-    department VARCHAR(100),
+    category VARCHAR(100),
     year_month VARCHAR(20),
     last_sequence INTEGER DEFAULT 1,
-    PRIMARY KEY (department, year_month)
+    PRIMARY KEY (category, year_month)
 );
 ALTER TABLE file_sequences OWNER TO vaultadmin;
 
@@ -122,15 +108,15 @@ CREATE TABLE user_bulk_permissions (
 );
 ALTER TABLE user_bulk_permissions OWNER TO vaultadmin;
 
-CREATE TABLE user_department_permissions (
+CREATE TABLE user_category_permissions (
     id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
-    department VARCHAR(100) NOT NULL,
+    category VARCHAR(100) NOT NULL,
     can_upload BOOLEAN DEFAULT false,
     updated_at TIMESTAMP DEFAULT NOW(),
-    UNIQUE(user_id, department)
+    UNIQUE(user_id, category)
 );
-ALTER TABLE user_department_permissions OWNER TO vaultadmin;
+ALTER TABLE user_category_permissions OWNER TO vaultadmin;
 
 CREATE TABLE audit_logs (
     id SERIAL PRIMARY KEY,
@@ -151,22 +137,21 @@ CREATE TABLE audit_undo_payloads (
 );
 ALTER TABLE audit_undo_payloads OWNER TO vaultadmin;
 
-CREATE TABLE company_departments (
+CREATE TABLE masterfolder_categories (
     id SERIAL PRIMARY KEY,
-    company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
-    fy_id INTEGER REFERENCES financial_years(id) ON DELETE CASCADE,
+    masterfolder_id INTEGER REFERENCES masterfolders(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
-ALTER TABLE company_departments OWNER TO vaultadmin;
+ALTER TABLE masterfolder_categories OWNER TO vaultadmin;
 
-CREATE TABLE company_department_folders (
+CREATE TABLE masterfolder_category_folders (
     id SERIAL PRIMARY KEY,
-    department_id INTEGER REFERENCES company_departments(id) ON DELETE CASCADE,
+    category_id INTEGER REFERENCES masterfolder_categories(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
     created_at TIMESTAMP DEFAULT NOW()
 );
-ALTER TABLE company_department_folders OWNER TO vaultadmin;
+ALTER TABLE masterfolder_category_folders OWNER TO vaultadmin;
 
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO vaultadmin;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO vaultadmin;

@@ -11,18 +11,18 @@ export default function SearchFilters() {
   const searchParams = useSearchParams();
   const [isSearchInOpen, setIsSearchInOpen] = useState(false);
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const [options, setOptions] = useState<{departments:string[];companies:string[];financialYears:string[];uploadedBy:string[];tags:string[];hddLocations:string[]}>({
-    departments: [], companies: [], financialYears: [], uploadedBy: [], tags: [], hddLocations: []
+  const [options, setOptions] = useState<{categories:string[];masterfolders:string[];uploadedBy:string[];tags:string[];hddLocations:string[]}>({
+    categories: [], masterfolders: [], uploadedBy: [], tags: [], hddLocations: []
   });
 
   const activeFilter = searchParams.get('fileType') || searchParams.get('type') || '';
   const rawScope = searchParams.get('scope') || 'fy';
-  const activeScope = (rawScope === 'all' || rawScope === 'company') ? 'fy' : rawScope;
+  const activeScope = (rawScope === 'all' || rawScope === 'masterfolder') ? 'fy' : rawScope;
   const folder = searchParams.get('folder') || '';
   const currentFyName = searchParams.get('fyLabel') || 'This FY';
 
   useEffect(() => {
-    if (rawScope === 'all' || rawScope === 'company') {
+    if (rawScope === 'all' || rawScope === 'masterfolder') {
       const params = new URLSearchParams(searchParams);
       params.set('scope', 'fy');
       router.replace(`${pathname}?${params.toString()}`);
@@ -37,9 +37,8 @@ export default function SearchFilters() {
         if (!res.ok) return;
         const data = await res.json();
         setOptions({
-          departments: data.departments || [],
-          companies: data.companies || [],
-          financialYears: data.financialYears || [],
+          categories: data.categories || [],
+          masterfolders: data.masterfolders || [],
           uploadedBy: data.uploadedBy || [],
           tags: data.tags || [],
           hddLocations: data.hddLocations || []
@@ -100,7 +99,7 @@ export default function SearchFilters() {
   const filters = ['docs', 'video', 'audio', 'images', 'design'];
   const scopeLabel = useMemo(() => ({
     fy: 'This FY only',
-    dept: 'This department only',
+    category: 'This category only',
     folder: folder ? `This folder: ${folder}` : 'This folder only'
   }[activeScope] || 'This FY only'), [activeScope, folder]);
   const selected = (key: string) => (searchParams.get(key) || '').split(',').filter(Boolean);
@@ -126,7 +125,7 @@ export default function SearchFilters() {
               <div className="absolute top-[calc(100%+4px)] left-0 min-w-[170px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] rounded-[11px] overflow-hidden z-50 py-1 animate-in fade-in slide-in-from-top-1 duration-200">
                 {[
                   ['fy', currentFyName],
-                  ['dept', 'This department only'],
+                  ['category', 'This category only'],
                   ['folder', 'This folder only']
                 ].map(([value, label]) => (
                   <button
@@ -191,9 +190,9 @@ export default function SearchFilters() {
               <input type="date" value={searchParams.get('to') || ''} onChange={(e) => setParam('to', e.target.value)} className="bg-[var(--bg-surface)] rounded-[8px] border border-[var(--border-subtle)] px-2 py-2 text-[13px]" />
             </div>
             <div className="flex flex-wrap gap-2">
-              {['today','week','month','fy'].map(preset => (
+              {['today','week','month'].map(preset => (
                 <button key={preset} onClick={() => applyQuickDate(preset as any)} className="text-[11px] px-2 py-1 rounded-[8px] bg-[var(--bg-surface)] border border-[var(--border-subtle)] text-[var(--text-secondary)] hover:border-[var(--accent)]">
-                  {preset === 'fy' ? 'This FY' : preset[0].toUpperCase() + preset.slice(1)}
+                  {preset[0].toUpperCase() + preset.slice(1)}
                 </button>
               ))}
             </div>
@@ -213,14 +212,14 @@ export default function SearchFilters() {
 
           <div className="bg-[var(--bg-elevated)] rounded-[12px] border border-[var(--border-subtle)] p-3 flex flex-col gap-2">
             <p className="text-[11px] font-bold uppercase tracking-widest text-[var(--text-tertiary)]">Metadata filters</p>
-            <select multiple value={selected('departments')} onChange={(e) => setMultiFromSelect('departments', Array.from(e.currentTarget.selectedOptions).map(opt => opt.value))} className="bg-[var(--bg-surface)] rounded-[8px] border border-[var(--border-subtle)] px-2 py-2 text-[13px] min-h-[76px]">
-              {options.departments.map(v => <option key={v} value={v}>{v}</option>)}
+            <select multiple value={selected('categories')} onChange={(e) => setMultiFromSelect('categories', Array.from(e.currentTarget.selectedOptions).map(opt => opt.value))} className="bg-[var(--bg-surface)] rounded-[8px] border border-[var(--border-subtle)] px-2 py-2 text-[13px] min-h-[76px]">
+              {options.categories.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
-            <select multiple value={selected('companies')} onChange={(e) => setMultiFromSelect('companies', Array.from(e.currentTarget.selectedOptions).map(opt => opt.value))} className="bg-[var(--bg-surface)] rounded-[8px] border border-[var(--border-subtle)] px-2 py-2 text-[13px] min-h-[76px]">
-              {options.companies.map(v => <option key={v} value={v}>{v}</option>)}
+            <select multiple value={selected('masterfolders')} onChange={(e) => setMultiFromSelect('masterfolders', Array.from(e.currentTarget.selectedOptions).map(opt => opt.value))} className="bg-[var(--bg-surface)] rounded-[8px] border border-[var(--border-subtle)] px-2 py-2 text-[13px] min-h-[76px]">
+              {options.masterfolders.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
-            <select multiple value={selected('financialYears')} onChange={(e) => setMultiFromSelect('financialYears', Array.from(e.currentTarget.selectedOptions).map(opt => opt.value))} className="bg-[var(--bg-surface)] rounded-[8px] border border-[var(--border-subtle)] px-2 py-2 text-[13px] min-h-[76px]">
-              {options.financialYears.map(v => <option key={v} value={v}>{v}</option>)}
+            <select multiple value={selected('masterfolders')} onChange={(e) => setMultiFromSelect('masterfolders', Array.from(e.currentTarget.selectedOptions).map(opt => opt.value))} className="bg-[var(--bg-surface)] rounded-[8px] border border-[var(--border-subtle)] px-2 py-2 text-[13px] min-h-[76px]">
+              {options.masterfolders.map(v => <option key={v} value={v}>{v}</option>)}
             </select>
           </div>
 

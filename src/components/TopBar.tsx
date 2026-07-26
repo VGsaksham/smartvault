@@ -24,23 +24,21 @@ export default function TopBar() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const [companies, setCompanies] = useState<any[]>([]);
-  const [financialYears, setFinancialYears] = useState<any[]>([]);
+  const [masterfolders, setmasterfolders] = useState<any[]>([]);
 
-  const [companyId, setCompanyId] = useState<string>("");
-  const [isCompanyOpen, setIsCompanyOpen] = useState(false);
+  const [masterfolderId, setMasterfolderId] = useState<string>("");
+  const [ismasterfolderOpen, setIsmasterfolderOpen] = useState(false);
   
-  const [fyId, setFyId] = useState<string>("");
-  const [isFyOpen, setIsFyOpen] = useState(false);
+
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<{ username?: string; role?: string } | null>(null);
-  const [allowedCompanyIds, setAllowedCompanyIds] = useState<number[] | null>(null);
+  const [allowedMasterfolderIds, setAllowedMasterfolderIds] = useState<number[] | null>(null);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   // Search UI is intentionally NOT synced to URL params.
   // This keeps it independent from the main dashboard listing.
   const [query, setQuery] = useState('');
-  const [scope, setScope] = useState<'all_companies'|'fy'|'dept'|'folder'>('fy');
+  const [scope, setScope] = useState<'all_masterfolders'|'category'|'folder'>('folder');
   const [fileType, setFileType] = useState('');
   const [matchCase, setMatchCase] = useState(false);
   const [exact, setExact] = useState(false);
@@ -64,21 +62,21 @@ export default function TopBar() {
         parsedUser = JSON.parse(storedUser);
         setCurrentUser(parsedUser);
         const payload = decodeJwtPayload(token);
-        const tokenRole: string | null = payload?.role || null;
+        const tokenRole: string | null = payload?.role ;
 
-        const effectiveRole = tokenRole || parsedUser?.role || null;
+        const effectiveRole = tokenRole || parsedUser?.role ;
         if (effectiveRole !== 'Admin') {
           const ids = Array.from(
             new Set<number>([
-              ...(Array.isArray(parsedUser?.company_access) ? parsedUser.company_access : []).map((entry: any) => Number(entry?.company_id)),
+              ...(Array.isArray(parsedUser?.masterfolder_access) ? parsedUser.masterfolder_access : []).map((entry: any) => Number(entry?.masterfolder_id)),
               ...(Array.isArray(parsedUser?.folder_access) ? parsedUser.folder_access : [])
                   .filter((entry: any) => !entry.is_exclusion)
-                  .map((entry: any) => Number(entry?.company_id))
+                  .map((entry: any) => Number(entry?.masterfolder_id))
             ].filter((id: number) => Number.isFinite(id)))
           );
-          setAllowedCompanyIds(ids.length > 0 ? ids : []);
+          setAllowedMasterfolderIds(ids.length > 0 ? ids : []);
         } else {
-          setAllowedCompanyIds(null);
+          setAllowedMasterfolderIds(null);
         }
       } catch {}
     }
@@ -88,7 +86,7 @@ export default function TopBar() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    fetch(apiUrl('/api/companies'), { headers: { 'Authorization': `Bearer ${token}` } })
+    fetch(apiUrl('/api/masterfolders'), { headers: { 'Authorization': `Bearer ${token}` } })
     .then(async (resComps) => {
       if (resComps.status === 401 || resComps.status === 403) {
         localStorage.removeItem('token');
@@ -99,20 +97,18 @@ export default function TopBar() {
       const comps = await resComps.json();
       const allComps = Array.isArray(comps) ? comps : [];
       const validComps =
-        Array.isArray(allowedCompanyIds) && allowedCompanyIds.length > 0
-          ? allComps.filter((c: any) => allowedCompanyIds.includes(Number(c.id)))
+        Array.isArray(allowedMasterfolderIds) && allowedMasterfolderIds.length > 0
+          ? allComps.filter((c: any) => allowedMasterfolderIds.includes(Number(c.id)))
           : allComps;
       
-      setCompanies(validComps);
+      setmasterfolders(validComps);
 
-      // First-run onboarding: if there are no companies, guide Admin to create one.
+      // First-run onboarding: if there are no masterfolders, guide Admin to create one.
       // Keep this non-blocking; it only nudges and preserves current page.
       if (validComps.length === 0) {
-        setCompanyId('');
-        setFyId('');
+        setMasterfolderId('');
         const currentParams = new URLSearchParams(searchParams);
-        currentParams.delete('companyId');
-        currentParams.delete('fyId');
+        currentParams.delete('masterfolderId');
         const nextQuery = currentParams.toString();
         if (nextQuery !== searchKey) {
           router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
@@ -122,93 +118,48 @@ export default function TopBar() {
       const currentParams = new URLSearchParams(searchParams);
       let updated = false;
 
-      let initialCompId = searchParams.get('companyId');
+      let initialCompId = searchParams.get('masterfolderId');
       const currentCompAllowed = validComps.some((c: any) => String(c.id) === String(initialCompId || ''));
       if ((!initialCompId || !currentCompAllowed) && validComps.length > 0) {
         initialCompId = validComps[0].id.toString();
-        currentParams.set('companyId', initialCompId!);
+        currentParams.set('masterfolderId', initialCompId!);
         updated = true;
       }
       if (validComps.length === 0) {
-        currentParams.delete('companyId');
-        currentParams.delete('fyId');
+        currentParams.delete('masterfolderId');
         updated = true;
       }
-      if (initialCompId) setCompanyId(initialCompId);
-
-      let initialFyId = searchParams.get('fyId');
-      if (initialFyId) setFyId(initialFyId);
+      if (initialCompId) setMasterfolderId(initialCompId);
 
       const nextQuery = currentParams.toString();
       if (updated && nextQuery !== searchKey) {
         router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
       }
     }).catch(console.error);
-  }, [allowedCompanyIds, pathname, router, searchKey]);
-
-  useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (!token || !companyId) return;
-    fetch(apiUrl(`/api/financial-years?companyId=${companyId}`), { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(async (resFys) => {
-        if (resFys.status === 401 || resFys.status === 403) {
-          localStorage.removeItem('token');
-          window.location.href = '/login';
-          return;
-        }
-        const fys = await resFys.json();
-        const validFys = Array.isArray(fys) ? fys : [];
-        setFinancialYears(validFys);
-
-        const params = new URLSearchParams(searchParams);
-        // Ensure we never "snap back" to an old companyId due to stale searchParams closure.
-        // Always prefer the current selected companyId state.
-        if (companyId) params.set('companyId', companyId);
-        const selectedFy = params.get('fyId');
-        const fyExists = validFys.some((f: any) => f.id.toString() === selectedFy);
-        if (!selectedFy || !fyExists) {
-          const activeFy = validFys.find((f: any) => f.status === 'Active');
-          const nextFyId = activeFy ? activeFy.id.toString() : validFys[0]?.id?.toString();
-          if (nextFyId) {
-            setFyId(nextFyId);
-            params.set('fyId', nextFyId);
-            const nextQuery = params.toString();
-            if (nextQuery !== searchKey) {
-              router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
-            }
-          }
-        } else {
-          setFyId(selectedFy);
-        }
-      })
-      .catch(console.error);
-  }, [companyId, pathname, router, searchKey]);
+  }, [allowedMasterfolderIds, pathname, router, searchKey]);
 
 
 
   // Ensure params are preserved in URL when navigating across views
   useEffect(() => {
-    const urlCompanyId = searchParams.get('companyId');
-    const urlFyId = searchParams.get('fyId');
+    const urlMasterfolderId = searchParams.get('masterfolderId');
     let updated = false;
     const params = new URLSearchParams(searchParams);
 
-    if (!urlCompanyId && companyId) {
-      params.set('companyId', companyId);
-      updated = true;
-    }
-    // Only re-inject fyId if it's non-empty AND belongs to the current company
-    // (prevents stale old-company FY being re-injected after company switch)
-    if (!urlFyId && fyId && urlCompanyId === companyId) {
-      params.set('fyId', fyId);
+    if (!urlMasterfolderId && masterfolderId) {
+      params.set('masterfolderId', masterfolderId);
       updated = true;
     }
 
+
     const nextQuery = params.toString();
     if (updated && nextQuery !== searchKey) {
+      if (masterfolderId) localStorage.setItem('last_masterfolderId', masterfolderId);
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname);
+    } else if (masterfolderId) {
+      localStorage.setItem('last_masterfolderId', masterfolderId);
     }
-  }, [searchParams, pathname, companyId, fyId, router, searchKey]);
+  }, [searchParams, pathname, masterfolderId, router, searchKey]);
 
   useEffect(() => {
     const onOutsideClick = (e: MouseEvent) => {
@@ -219,21 +170,11 @@ export default function TopBar() {
     return () => window.removeEventListener('mousedown', onOutsideClick);
   }, []);
 
-  const handleCompanyChange = (id: string) => {
-    setCompanyId(id);
-    setFyId(''); // clear stale FY immediately
-    setIsCompanyOpen(false);
+  const handlemasterfolderChange = (id: string) => {
+    setMasterfolderId(id);
+    setIsmasterfolderOpen(false);
     const params = new URLSearchParams(searchParams);
-    params.set('companyId', id);
-    params.delete('fyId'); // remove stale fyId — will be repopulated by the FY fetch useEffect
-    router.replace(`${pathname}?${params.toString()}`);
-  };
-
-  const handleFyChange = (id: string) => {
-    setFyId(id);
-    setIsFyOpen(false);
-    const params = new URLSearchParams(searchParams);
-    params.set('fyId', id);
+    params.set('masterfolderId', id);
     router.replace(`${pathname}?${params.toString()}`);
   };
 
@@ -249,19 +190,19 @@ export default function TopBar() {
         const params = new URLSearchParams();
         params.set('q', query.trim());
         params.set('scope', scope);
-        if (companyId) params.set('companyId', companyId);
-        if (fyId) params.set('fyId', fyId);
-        let dept = searchParams.get('dept');
-        if (!dept && pathname.startsWith('/departments/')) {
-          const rawDept = pathname.split('/')[2];
-          dept = rawDept.charAt(0).toUpperCase() + rawDept.slice(1);
+        if (masterfolderId) params.set('masterfolderId', masterfolderId);
+        
+        let category = searchParams.get('category');
+        if (!category && pathname.startsWith('/categories/')) {
+          const rawCategory = pathname.split('/')[2];
+          category = rawCategory.charAt(0).toUpperCase() + rawCategory.slice(1);
         }
-        if (scope === 'dept' && dept && dept !== 'All files') params.set('departments', dept);
+        if (scope === 'category' && category && category !== 'All files') params.set('categories', category);
         
         const folder = searchParams.get('folder');
         if (scope === 'folder') {
           if (folder) params.set('folder', folder);
-          if (dept && dept !== 'All files') params.set('departments', dept);
+          if (category && category !== 'All files') params.set('categories', category);
         }
         if (fileType) params.set('fileType', fileType);
         if (matchCase) params.set('matchCase', 'true');
@@ -289,7 +230,7 @@ export default function TopBar() {
       }
     }, 400);
     return () => clearTimeout(id);
-  }, [query, scope, fileType, matchCase, exact, companyId, fyId, folderParam, dateFilter, customFrom, customTo]);
+  }, [query, scope, fileType, matchCase, exact, masterfolderId, folderParam, dateFilter, customFrom, customTo]);
 
 
 
@@ -312,9 +253,9 @@ export default function TopBar() {
 
   const openResultLocation = (file: any, openPreview = false) => {
     const params = new URLSearchParams(searchParams);
-    if (file.company_id) params.set('companyId', String(file.company_id));
-    if (file.fy_id) params.set('fyId', String(file.fy_id));
-    if (file.department) params.set('dept', file.department);
+    if (file.masterfolder_id) params.set('masterfolderId', String(file.masterfolder_id));
+    if (file.fy_id) params.set('null', String(file.fy_id));
+    if (file.category) params.set('category', file.category);
     if (file.folder) params.set('folder', file.folder);
     params.set('focusFileId', String(file.id));
     if (openPreview) params.set('openFileId', String(file.id));
@@ -347,69 +288,35 @@ export default function TopBar() {
             SmartVault
           </h2>
 
-          {/* Dropdowns — hidden on mobile, visible on md+ */}
+          {/* Masterfolder Dropdown — hidden on mobile, visible on md+ */}
           <div className="hidden md:flex items-center gap-2">
-            {/* Company Dropdown */}
             <div className="relative">
               <button
-                onClick={() => setIsCompanyOpen(!isCompanyOpen)}
-                className="flex items-center justify-between min-w-[130px] bg-[var(--bg-elevated)] text-[var(--text-primary)] text-[14px] tracking-[-0.224px] rounded-[11px] border border-[var(--border-subtle)] py-[4px] pl-[14px] pr-[12px] cursor-pointer outline-none focus:border-[var(--accent)] transition-colors"
+                onClick={() => setIsmasterfolderOpen(!ismasterfolderOpen)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] font-medium text-[var(--text-secondary)] transition-colors min-w-[140px] justify-between cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
               >
-                <span className="opacity-80">
-                  {(Array.isArray(companies) ? companies : []).find((c) => c.id.toString() === companyId)?.name || 'Loading...'}
-                </span>
-                <div className={`ml-2 text-[var(--text-tertiary)] text-[10px] transition-transform duration-200 ${isCompanyOpen ? 'rotate-180' : ''}`}>▼</div>
+                <span className="truncate">{masterfolders.find(c => String(c.id) === masterfolderId)?.name || 'Loading...'}</span>
+                <span className="text-[9px] text-[var(--text-tertiary)] opacity-60 ml-1">▼</span>
               </button>
-
-              {isCompanyOpen && (
+              {ismasterfolderOpen && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsCompanyOpen(false)}></div>
-                  <div className="absolute top-[calc(100%+4px)] left-0 min-w-[130px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] rounded-[11px] overflow-hidden z-50 py-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                    {(Array.isArray(companies) ? companies : []).map((opt) => (
-                      <button
-                        key={opt.id}
-                        onClick={() => handleCompanyChange(opt.id.toString())}
-                        className={`w-full text-left px-[14px] py-[6px] text-[14px] tracking-[-0.224px] transition-colors hover:bg-[var(--bg-neutral)] ${companyId === opt.id.toString() ? 'text-[var(--accent)] font-medium bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)]' : 'text-[var(--text-primary)]'}`}
-                      >
-                        {opt.name}
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Financial Year Dropdown */}
-            <div className="relative">
-              <button
-                onClick={() => setIsFyOpen(!isFyOpen)}
-                className="flex items-center justify-between min-w-[160px] bg-[var(--bg-elevated)] text-[var(--text-primary)] text-[14px] tracking-[-0.224px] rounded-[11px] border border-[var(--border-subtle)] py-[4px] pl-[14px] pr-[12px] cursor-pointer outline-none focus:border-[var(--accent)] transition-colors whitespace-nowrap"
-              >
-                <span className="opacity-80">
-                  {(Array.isArray(financialYears) ? financialYears : []).find((f) => f.id.toString() === fyId)?.name || 'Loading...'}
-                </span>
-                <div className={`ml-2 text-[var(--text-tertiary)] text-[10px] transition-transform duration-200 ${isFyOpen ? 'rotate-180' : ''}`}>▼</div>
-              </button>
-
-              {isFyOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsFyOpen(false)}></div>
-                  <div className="absolute top-[calc(100%+4px)] left-0 min-w-[200px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] rounded-[11px] overflow-hidden z-50 py-1 animate-in fade-in slide-in-from-top-1 duration-200">
-                    {(Array.isArray(financialYears) ? financialYears : []).map((opt) => (
-                      <button
-                        key={opt.id}
-                        onClick={() => handleFyChange(opt.id.toString())}
-                        className={`w-full text-left px-[14px] py-[6px] text-[14px] tracking-[-0.224px] transition-colors hover:bg-[var(--bg-neutral)] flex items-center justify-between gap-2 ${fyId === opt.id.toString() ? 'text-[var(--accent)] font-medium bg-[var(--accent-soft)] hover:bg-[var(--accent-soft)]' : 'text-[var(--text-primary)]'}`}
-                      >
-                        {opt.name}
-                        {opt.status === 'Active' && (
-                          <span className="text-[10px] font-semibold text-[#34c759] bg-[#34c75915] px-[6px] py-[1px] rounded-full border border-[#34c75920]">Current</span>
-                        )}
-                        {opt.status === 'Archived' && (
-                          <span className="text-[10px] font-medium text-[var(--text-tertiary)] bg-[var(--bg-neutral)] px-[6px] py-[1px] rounded-full border border-[var(--border-subtle)]">Archived</span>
-                        )}
-                      </button>
-                    ))}
+                  <div className="fixed inset-0 z-40" onClick={() => setIsmasterfolderOpen(false)} />
+                  <div className="absolute top-[calc(100%+4px)] left-0 w-[240px] rounded-[10px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] z-50 py-1 max-h-[300px] overflow-y-auto">
+                    {masterfolders.length === 0 ? (
+                      <div className="px-3 py-2 text-[12px] text-[var(--text-tertiary)]">No masterfolders available</div>
+                    ) : (
+                      masterfolders.map((c) => (
+                        <button
+                          key={c.id}
+                          onClick={() => handlemasterfolderChange(String(c.id))}
+                          className={`w-full text-left px-3 py-2 text-[13px] hover:bg-[var(--bg-neutral)] transition-colors ${masterfolderId === String(c.id) ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-semibold' : 'text-[var(--text-primary)]'}`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <span className="truncate">{c.name}</span>
+                          </div>
+                        </button>
+                      ))
+                    )}
                   </div>
                 </>
               )}
@@ -467,7 +374,7 @@ export default function TopBar() {
                   </div>
                   <button onClick={() => goTo('/admin/users')} className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-colors">Users & Roles</button>
                   {currentUser?.role === 'Admin' && (
-                    <button onClick={() => goTo('/admin/companies')} className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-colors">Companies & FY</button>
+                    <button onClick={() => goTo('/admin/masterfolders')} className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-colors">Masterfolders</button>
                   )}
                   <div className="h-[1px] bg-[var(--border-subtle)]" />
                   <button onClick={handleLogout} className="w-full text-left px-4 py-2.5 text-[13px] text-[#ff5b52] hover:bg-[#ff5b5210] transition-colors">Sign Out</button>
@@ -484,9 +391,8 @@ export default function TopBar() {
           <div className="bg-[var(--bg-surface)] border border-[var(--border-default)] rounded-[16px] shadow-[var(--shadow-medium)] overflow-hidden">
             <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-center gap-2 flex-wrap">
               {[
-                ['all_companies', 'All companies'],
-                ['fy', 'This FY only'],
-                ['dept', 'This department only'],
+                ['all_masterfolders', 'All masterfolders'],
+                ['category', 'This category only'],
                 ['folder', 'This folder only']
               ].map(([key, label]) => (
                 <button
@@ -610,11 +516,11 @@ export default function TopBar() {
                   >
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
-                        {file.user_alias || file.custom_name || file.auto_name || file.original_name}
+                        {file.user_alias || file.custom_name || file.original_name}
                       </p>
                     </div>
                     <div className="mt-1 text-[11px] text-[var(--text-tertiary)] flex flex-wrap items-center gap-1">
-                      <span>{file.company_name || '-'}</span><span>›</span><span>{file.fy_name || '-'}</span><span>›</span><span>{file.department || '-'}</span>
+                      <span>{file.masterfolder_name || '-'}</span><span>›</span><span>{file.category || '-'}</span>
                       {file.folder && (<><span>›</span><span>{file.folder}</span></>)}
                     </div>
                   </div>

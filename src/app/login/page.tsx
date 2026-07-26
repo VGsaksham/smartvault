@@ -90,7 +90,7 @@ export default function LoginPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full bg-[#fafafc] border border-[rgba(0,0,0,0.08)] rounded-[11px] py-[10px] px-[14px] text-[#1d1d1f] text-[17px] tracking-[-0.374px] focus:outline focus:outline-2 focus:outline-[#0071e3] focus:bg-[#ffffff] transition-colors placeholder:text-[rgba(0,0,0,0.24)]"
-              placeholder="name@company.com"
+              placeholder="name@masterfolder.com"
             />
           </div>
 

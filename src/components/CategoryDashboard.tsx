@@ -23,7 +23,7 @@ interface DeptStats {
   };
 }
 
-export default function DepartmentDashboard({ department, companyId, fyId }: { department: string; companyId: string | null; fyId: string | null }) {
+export default function CategoryDashboard({ category, masterfolderId }: { category: string; masterfolderId: string | null }) {
   const [stats, setStats] = useState<DeptStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [userRole, setUserRole] = useState<string | null>(null);
@@ -39,12 +39,12 @@ export default function DepartmentDashboard({ department, companyId, fyId }: { d
   }, []);
 
   useEffect(() => {
-    if (!department || !companyId || !fyId) return;
+    if (!category || !masterfolderId ) return;
 
     setLoading(true);
     setStats(null); // reset stale data before fetching new
     const token = localStorage.getItem('token');
-    fetch(apiUrl(`/api/stats/department/${encodeURIComponent(department)}?companyId=${companyId}&fyId=${fyId}`), {
+    fetch(apiUrl(`/api/stats/category/${encodeURIComponent(category)}?masterfolderId=${masterfolderId}`), {
       headers: { 'Authorization': `Bearer ${token}` }
     })
       .then(res => res.json())
@@ -62,7 +62,7 @@ export default function DepartmentDashboard({ department, companyId, fyId }: { d
         setStats(null);
         setLoading(false);
       });
-  }, [department, companyId, fyId]);
+  }, [category, masterfolderId]);
 
   if (userRole && userRole !== 'Admin' && userRole !== 'Manager') {
     return null;
@@ -77,7 +77,7 @@ export default function DepartmentDashboard({ department, companyId, fyId }: { d
   );
 
 
-  // Use fallback zeros — dashboard renders even when dept has no files yet in this Company/FY
+  // Use fallback zeros — dashboard renders even when category has no files yet in this masterfolder/FY
   const storage = stats?.storage ?? { total_files: 0, total_size: 0, local_size: 0, minio_size: 0, quota_gb: 5 };
   const usedGb = (storage.total_size / (1024 * 1024 * 1024)).toFixed(2);
   const localGb = (storage.local_size / (1024 * 1024 * 1024)).toFixed(2);
@@ -168,20 +168,20 @@ export default function DepartmentDashboard({ department, companyId, fyId }: { d
             <span className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.1em]">Quick Actions</span>
           </div>
           <div className="grid grid-cols-2 gap-3 flex-1">
-            <Link href={`/admin/duplicates?companyId=${companyId || ''}&fyId=${fyId || ''}`} className="flex flex-col items-center justify-center gap-2 bg-[var(--bg-neutral)] rounded-[14px] hover:bg-[var(--bg-elevated)] hover:border-[var(--accent)] border border-transparent transition-all">
+            <Link href={`/admin/duplicates?masterfolderId=${masterfolderId || ''}`} className="flex flex-col items-center justify-center gap-2 bg-[var(--bg-neutral)] rounded-[14px] hover:bg-[var(--bg-elevated)] hover:border-[var(--accent)] border border-transparent transition-all">
               <Search size={18} className="text-[var(--text-primary)]" />
               <span className="text-[12px] font-medium text-[var(--text-primary)] text-center leading-tight">Duplicate Scan</span>
             </Link>
             <button 
               onClick={() => {
                 const token = localStorage.getItem('token');
-                fetch(apiUrl(`/api/export/activity-report/${encodeURIComponent(department)}?companyId=${companyId}&fyId=${fyId}`), { headers: { 'Authorization': `Bearer ${token}` } })
+                fetch(apiUrl(`/api/export/activity-report/${encodeURIComponent(category)}?masterfolderId=${masterfolderId}`), { headers: { 'Authorization': `Bearer ${token}` } })
                   .then(res => res.blob())
                   .then(blob => {
                     const url = window.URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
-                    a.download = `activity_report_${department}.csv`;
+                    a.download = `activity_report_${category}.csv`;
                     a.click();
                   });
               }}
@@ -200,11 +200,11 @@ export default function DepartmentDashboard({ department, companyId, fyId }: { d
           <div className="flex items-center gap-3">
             <AlertCircle className="text-[#ff9500]" size={20} />
             <p className="text-[14px] font-medium text-[#cc7700]">
-              <strong>{stats!.duplicates.length} duplicate groups</strong> detected in this department, wasting {formatBytes(stats!.duplicates.reduce((acc, curr) => acc + Number(curr.wasted_size), 0))}.
+              <strong>{stats!.duplicates.length} duplicate groups</strong> detected in this category, wasting {formatBytes(stats!.duplicates.reduce((acc, curr) => acc + Number(curr.wasted_size), 0))}.
             </p>
           </div>
           {userRole === 'Admin' && (
-            <Link href={`/admin/duplicates?companyId=${companyId || ''}&fyId=${fyId || ''}`} className="text-[13px] font-bold text-[#ff9500] hover:underline bg-white/50 px-3 py-1.5 rounded-[8px]">
+            <Link href={`/admin/duplicates?masterfolderId=${masterfolderId || ''}`} className="text-[13px] font-bold text-[#ff9500] hover:underline bg-white/50 px-3 py-1.5 rounded-[8px]">
               Resolve Now
             </Link>
           )}

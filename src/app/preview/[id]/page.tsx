@@ -191,7 +191,7 @@ export default function PreviewPage() {
               {file.original_name}
             </h1>
             <p className="text-[var(--text-secondary)] text-[17px] mb-8 font-medium">
-              {file.department} • {file.fy_name || 'N/A'}
+              {file.category} • {file.fy_name || 'N/A'}
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 w-full max-w-md">
@@ -221,13 +221,13 @@ export default function PreviewPage() {
             <div className="space-y-6">
               <InfoItem 
                 icon={<Building2 size={18} className="text-[var(--text-tertiary)]" />} 
-                label="Company" 
-                value={file.company_name} 
+                label="masterfolder" 
+                value={file.masterfolder_name} 
               />
               <InfoItem 
                 icon={<Folder size={18} className="text-[var(--text-tertiary)]" />} 
                 label="Destination" 
-                value={`${file.department}${file.folder ? ` / ${file.folder}` : ''}`} 
+                value={`${file.category}${file.folder ? ` / ${file.folder}` : ''}`} 
               />
             </div>
             <div className="space-y-6">

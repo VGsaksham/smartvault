@@ -30,16 +30,17 @@ export default function Sidebar() {
   const searchParams = useSearchParams();
   const { isSidebarOpen, closeSidebar } = useSidebar();
   
-  let activeDept = searchParams.get('dept') || 'All files';
-  if (pathname.startsWith('/departments/')) {
-    const rawDept = pathname.split('/')[2];
-    activeDept = rawDept.charAt(0).toUpperCase() + rawDept.slice(1);
+  let activeCategory = searchParams.get('category') || 'All files';
+  if (pathname.startsWith('/categories/')) {
+    const rawCategory = pathname.split('/')[2];
+    activeCategory = rawCategory.charAt(0).toUpperCase() + rawCategory.slice(1);
   }
 
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [userDept, setUserDept] = useState<string | null>(null);
-  const [allowedDepts, setAllowedDepts] = useState<string[]>([]);
-  const [structureDepts, setStructureDepts] = useState<string[]>([]);
+  const [userCategory, setUserCategory] = useState<string | null>(null);
+  const [allowedCategories, setAllowedDepts] = useState<string[]>([]);
+  const [structureCategories, setStructureDepts] = useState<string[]>([]);
+  const [canManageStructure, setCanManageStructure] = useState(false);
 
   useEffect(() => {
     const token = localStorage.getItem('token');
@@ -49,8 +50,9 @@ export default function Sidebar() {
         const payload = JSON.parse(atob(token.split('.')[1]));
         const user = storedUser ? JSON.parse(storedUser) : null;
         setUserRole(user?.role || payload.role);
-        setUserDept(user?.department || payload.department);
-        setAllowedDepts(user?.allowed_departments || payload.allowed_departments || []);
+        setUserCategory(user?.category || payload.category);
+        setAllowedDepts(user?.allowed_categories || payload.allowed_categories || []);
+        setCanManageStructure(user?.can_manage_structure || payload.can_manage_structure || false);
       } catch (e) {
         console.error('Invalid token payload in Sidebar');
       }
@@ -60,19 +62,36 @@ export default function Sidebar() {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token) return;
-    const companyId = searchParams.get('companyId');
-    const fyId = searchParams.get('fyId');
-    if (!companyId || !fyId) {
+    let masterfolderId = searchParams.get('masterfolderId');
+    if (!masterfolderId) masterfolderId = localStorage.getItem('last_masterfolderId');
+    if (!masterfolderId) {
       setStructureDepts([]);
       return;
     }
-    const params = new URLSearchParams({ companyId, fyId });
-    fetch(apiUrl(`/api/structure?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } })
+
+    const storedUser = localStorage.getItem('user');
+    const user = storedUser ? JSON.parse(storedUser) : null;
+    const isSystemAdmin = user?.role === 'Admin';
+
+    if (!isSystemAdmin) {
+      const accessRows = user?.masterfolder_access || [];
+      const folderRows = user?.folder_access || [];
+
+      const userCategories = [
+        ...accessRows.filter((x: any) => Number(x.masterfolder_id) === Number(masterfolderId)).map((x: any) => x.category),
+        ...folderRows.filter((x: any) => Number(x.masterfolder_id) === Number(masterfolderId) && !x.is_exclusion).map((x: any) => x.category)
+      ];
+      setStructureDepts(Array.from(new Set(userCategories)).filter(Boolean));
+      return;
+    }
+
+    const params = new URLSearchParams({ masterfolderId });
+    fetch(apiUrl(`/api/admin/structure?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return [];
-        const depts = Array.isArray((data as any)?.departments) ? (data as any).departments : [];
-        return depts.map((d: any) => String(d?.name || '')).filter(Boolean);
+        const categories = Array.isArray((data as any)?.categories) ? (data as any).categories : [];
+        return categories.map((d: any) => String(d?.name || '')).filter(Boolean);
       })
       .then((names: string[]) => setStructureDepts(names))
       .catch(() => setStructureDepts([]));
@@ -82,19 +101,35 @@ export default function Sidebar() {
     const handler = (ev: any) => {
       const token = localStorage.getItem('token');
       if (!token) return;
-      const companyId = searchParams.get('companyId');
-      const fyId = searchParams.get('fyId');
-      const detailCompany = ev?.detail?.companyId;
-      const detailFy = ev?.detail?.fyId;
-      if (!companyId || !fyId) return;
-      if (Number(detailCompany) !== Number(companyId) || Number(detailFy) !== Number(fyId)) return;
-      const params = new URLSearchParams({ companyId, fyId });
-      fetch(apiUrl(`/api/structure?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } })
+      let masterfolderId = searchParams.get('masterfolderId');
+      if (!masterfolderId) masterfolderId = localStorage.getItem('last_masterfolderId');
+      const detailmasterfolder = ev?.detail?.masterfolderId;
+      if (!masterfolderId ) return;
+      if (Number(detailmasterfolder) !== Number(masterfolderId)) return;
+
+      const storedUser = localStorage.getItem('user');
+      const user = storedUser ? JSON.parse(storedUser) : null;
+      const isSystemAdmin = user?.role === 'Admin';
+
+      if (!isSystemAdmin) {
+        const accessRows = user?.masterfolder_access || [];
+        const folderRows = user?.folder_access || [];
+
+        const userCategories = [
+          ...accessRows.filter((x: any) => Number(x.masterfolder_id) === Number(masterfolderId)).map((x: any) => x.category),
+          ...folderRows.filter((x: any) => Number(x.masterfolder_id) === Number(masterfolderId) && !x.is_exclusion).map((x: any) => x.category)
+        ];
+        setStructureDepts(Array.from(new Set(userCategories)).filter(Boolean));
+        return;
+      }
+
+      const params = new URLSearchParams({ masterfolderId });
+      fetch(apiUrl(`/api/admin/structure?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } })
         .then(async (res) => {
           const data = await res.json().catch(() => ({}));
           if (!res.ok) return [];
-          const depts = Array.isArray((data as any)?.departments) ? (data as any).departments : [];
-          return depts.map((d: any) => String(d?.name || '')).filter(Boolean);
+          const categories = Array.isArray((data as any)?.categories) ? (data as any).categories : [];
+          return categories.map((d: any) => String(d?.name || '')).filter(Boolean);
         })
         .then((names: string[]) => setStructureDepts(names))
         .catch(() => {});
@@ -126,11 +161,11 @@ export default function Sidebar() {
   const navigateTo = (path: string, params?: Record<string, string>) => {
     const currentParams = new URLSearchParams(searchParams);
     
-    if (!params?.dept) {
-      currentParams.delete('dept');
+    if (!params?.category) {
+      currentParams.delete('category');
     }
     
-    if (params?.dept && currentParams.get('dept') !== params.dept) {
+    if (params?.category && currentParams.get('category') !== params.category) {
       currentParams.delete('folder');
     } else if (pathname !== path) {
       currentParams.delete('folder');
@@ -149,14 +184,14 @@ export default function Sidebar() {
     { name: 'Starred', path: '/starred', params: {}, icon: Star, adminOnly: false },
     { name: 'Admin Dashboard', path: '/admin', params: {}, icon: LayoutDashboard, adminOnly: true },
     { name: 'Backups', path: '/admin/backups', params: {}, icon: Database, adminOnly: true },
-    { name: 'Departments & Folders', path: '/admin/structure', params: {}, icon: Layers, adminOnly: true },
-  ].filter(v => !v.adminOnly || userRole?.toLowerCase() === 'admin');
+    { name: 'Categories & Folders', path: '/admin/structure', params: {}, icon: Layers, adminOnly: true, structureManager: true },
+  ].filter(v => (!v.adminOnly || userRole?.toLowerCase() === 'admin') || (v.structureManager && canManageStructure));
 
-  const departments = (structureDepts.length > 0 ? structureDepts : [])
+  const categories = (structureCategories.length > 0 ? structureCategories : [])
     .map((name) => ({
       name,
       path: '/',
-      params: { dept: name },
+      params: { category: name },
       icon: Briefcase,
       adminOnly: false
     }));
@@ -181,7 +216,7 @@ export default function Sidebar() {
           <h3 className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.1em] mb-4 px-3">Views</h3>
           <ul className="space-y-1">
             {views.map((item) => {
-              const isActive = item.name === 'All files' ? activeDept === 'All files' && pathname === '/' : pathname === item.path;
+              const isActive = item.name === 'All files' ? activeCategory === 'All files' && pathname === '/' : pathname === item.path;
               const Icon = item.icon;
               return (
                 <li key={item.name}>
@@ -203,10 +238,10 @@ export default function Sidebar() {
         </div>
 
         <div>
-          <h3 className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.1em] mb-4 px-3">Departments</h3>
+          <h3 className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.1em] mb-4 px-3">Categories</h3>
           <ul className="space-y-1">
-            {departments.map((item) => {
-              const isActive = activeDept === item.name;
+            {categories.map((item) => {
+              const isActive = activeCategory === item.name;
               const Icon = item.icon;
               return (
                 <li key={item.name}>
