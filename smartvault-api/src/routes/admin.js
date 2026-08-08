@@ -647,14 +647,7 @@ router.get('/backups', verifyToken, async (req, res) => {
   }
 });
 
-router.get('/backups/config', verifyToken, async (req, res) => {
-  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
-  res.json({
-    backup_storage_path: env.BACKUP.path,
-    backup_cron: env.BACKUP.cron,
-    backup_retention_days: env.BACKUP.retentionDays,
-  });
-});
+
 
 
 router.post('/backups', verifyToken, async (req, res) => {
@@ -742,6 +735,7 @@ router.get('/backups/config', verifyToken, (req, res) => {
       res.json({ enabled: false, interval: 'Daily' });
     }
   } catch (err) {
+    console.error("Error reading backup config:", err);
     res.json({ enabled: false, interval: 'Daily' });
   }
 });
