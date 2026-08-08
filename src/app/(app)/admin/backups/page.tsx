@@ -165,6 +165,7 @@ export default function AdminBackupsPage() {
     try {
       const res = await fetch(apiUrl('/api/admin/backups/config'), {
         headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store'
       });
       const data = await res.json();
       if (res.ok) setConfig(data);
@@ -497,7 +498,7 @@ export default function AdminBackupsPage() {
           <select 
             className="p-2 bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-lg text-sm outline-none"
             onChange={(e) => saveSchedule(true, e.target.value)}
-            value={config?.interval || "Daily"}
+            value={config?.interval && config.interval !== 'Disabled' ? config.interval : "Daily"}
           >
             <option value="Daily">Daily (2:00 AM)</option>
             <option value="Weekly">Weekly (Sun 2:00 AM)</option>
@@ -509,7 +510,7 @@ export default function AdminBackupsPage() {
               Disable Auto-Backup
             </button>
           ) : (
-            <button onClick={() => saveSchedule(true, config?.interval || 'Daily')} className="px-3 py-2 rounded-lg bg-[#34c759] text-white text-sm font-semibold hover:bg-[#2fa84d] transition-colors">
+            <button onClick={() => saveSchedule(true, config?.interval && config.interval !== 'Disabled' ? config.interval : 'Daily')} className="px-3 py-2 rounded-lg bg-[#34c759] text-white text-sm font-semibold hover:bg-[#2fa84d] transition-colors">
               Enable Auto-Backup
             </button>
           )}
