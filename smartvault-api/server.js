@@ -2027,6 +2027,152 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
   }
 });
 
+app.post('/api/files/bulk/parse-rename-csv', verifyToken, upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+    const csvData = req.file.buffer.toString('utf-8');
+    const lines = csvData.split('\n');
+    const overrides = {};
+    const folderOverrides = {};
+    
+    // Skip header (i = 1)
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line) continue;
+      
+      let parts = [];
+      let current = '';
+      let inQuotes = false;
+      for (let j = 0; j < line.length; j++) {
+        const char = line[j];
+        if (char === '"' && line[j+1] === '"') {
+          current += '"';
+          j++; 
+        } else if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === ',' && !inQuotes) {
+          parts.push(current);
+          current = '';
+        } else {
+          current += char;
+        }
+      }
+      parts.push(current);
+      
+      if (parts.length >= 5) {
+        const fileId = parseInt(parts[0], 10);
+        if (!isNaN(fileId)) {
+          const proposedName = parts[3].trim();
+          const proposedFolder = parts[4].trim();
+          if (proposedName) overrides[fileId] = proposedName;
+          if (proposedFolder) folderOverrides[fileId] = proposedFolder === 'root' ? null : proposedFolder;
+        }
+      }
+    }
+    
+    res.json({ overrides, folderOverrides });
+  } catch (error) {
+    console.error('Error parsing CSV:', error);
+    res.status(500).json({ error: 'Failed to parse CSV' });
+  }
+});
+
+app.get('/api/folder/download', verifyToken, async (req, res) => {
+  if (req.user.role === 'Guest') {
+    return res.status(403).json({ error: "Guests cannot download files." });
+  }
+
+  const { category, folder, masterfolderId } = req.query;
+  if (!category) return res.status(400).json({ error: "Category is required" });
+
+  try {
+    await hydrateRequestUser(req);
+    if (req.user.role !== 'Admin' && req.user.can_bulk_download === false) {
+      return res.status(403).json({ error: "You do not have permission for bulk download." });
+    }
+    
+    if (!canAccessCategory(req.user, category)) {
+      return res.status(403).json({ error: "You do not have access to this category." });
+    }
+
+    let query = 'SELECT * FROM vault_files WHERE category = $1';
+    let values = [category];
+    let paramCount = 2;
+    
+    if (folder) {
+      query += ` AND (folder = $${paramCount} OR folder LIKE $${paramCount} || '/%')`;
+      values.push(folder);
+      paramCount++;
+    } else {
+      query += ` AND (folder IS NULL OR folder = 'null' OR folder = 'undefined' OR folder = '')`;
+    }
+    
+    if (masterfolderId) {
+       query += ` AND company_id = $${paramCount}`;
+       values.push(parseInt(masterfolderId, 10));
+       paramCount++;
+    }
+    
+    const result = await pool.query(query, values);
+    const filesToDownload = result.rows;
+
+    if (filesToDownload.length === 0) {
+      return res.status(404).json({ error: "No accessible files found in this folder." });
+    }
+
+    res.setHeader('Content-Type', 'application/zip');
+    res.setHeader('Content-Disposition', `attachment; filename="smartvault_folder_${(folder || 'root').replace(/\\W+/g, '_')}.zip"`);
+
+    const archive = archiver('zip', { zlib: { level: 9 } });
+    
+    archive.on('error', function(err) {
+      console.error("Archiver error:", err);
+      if (!res.headersSent) res.status(500).end();
+    });
+
+    archive.pipe(res);
+
+    for (const fileRecord of filesToDownload) {
+      try {
+        const isLocalZip = fileRecord.minio_filename.startsWith('local:');
+        const actualZipName = isLocalZip ? fileRecord.minio_filename.substring(6) : fileRecord.minio_filename;
+        let stream;
+        
+        if (isLocalZip) {
+          stream = fs.createReadStream(path.join(EXTERNAL_DRIVE_PATH, actualZipName));
+        } else {
+          stream = await minioClient.getObject(FILE_BUCKET, actualZipName);
+        }
+        
+        let relativePath = fileRecord.original_name;
+        if (fileRecord.folder && folder && fileRecord.folder.startsWith(folder)) {
+            const sub = fileRecord.folder.substring(folder.length);
+            if (sub && sub.startsWith('/')) {
+                relativePath = sub.substring(1) + '/' + fileRecord.original_name;
+            } else if (sub) {
+                relativePath = sub + '/' + fileRecord.original_name;
+            }
+        } else if (fileRecord.folder && !folder) {
+            relativePath = fileRecord.folder + '/' + fileRecord.original_name;
+        }
+        
+        archive.append(stream, { name: relativePath });
+      } catch (err) {
+        console.error(`Error appending file ${fileRecord.original_name} to zip:`, err);
+      }
+    }
+    
+    archive.finalize();
+  } catch (error) {
+    console.error("Folder download error:", error);
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to process folder download" });
+    }
+  }
+});
+
 app.get('/api/files/bulk/download', verifyToken, async (req, res) => {
   if (req.user.role === 'Guest') {
     return res.status(403).json({ error: "Guests cannot download files." });

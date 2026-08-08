@@ -497,16 +497,22 @@ export default function AdminBackupsPage() {
           <select 
             className="p-2 bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-lg text-sm outline-none"
             onChange={(e) => saveSchedule(true, e.target.value)}
-            defaultValue="Daily"
+            value={config?.interval || "Daily"}
           >
             <option value="Daily">Daily (2:00 AM)</option>
             <option value="Weekly">Weekly (Sun 2:00 AM)</option>
             <option value="Monthly">Monthly (1st 2:00 AM)</option>
             <option value="Quarterly">Quarterly</option>
           </select>
-          <button onClick={() => saveSchedule(false, 'Disabled')} className="px-3 py-2 rounded-lg border border-[#ff5b52] text-[#ff5b52] text-sm font-semibold hover:bg-[#ff5b52]/10 transition-colors">
-            Disable Auto-Backup
-          </button>
+          {config?.enabled ? (
+            <button onClick={() => saveSchedule(false, 'Disabled')} className="px-3 py-2 rounded-lg border border-[#ff5b52] text-[#ff5b52] text-sm font-semibold hover:bg-[#ff5b52]/10 transition-colors">
+              Disable Auto-Backup
+            </button>
+          ) : (
+            <button onClick={() => saveSchedule(true, config?.interval || 'Daily')} className="px-3 py-2 rounded-lg bg-[#34c759] text-white text-sm font-semibold hover:bg-[#2fa84d] transition-colors">
+              Enable Auto-Backup
+            </button>
+          )}
         </div>
       </div>
     </div>
