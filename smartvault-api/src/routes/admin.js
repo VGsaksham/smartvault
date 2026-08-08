@@ -734,7 +734,7 @@ router.post('/backups/restore', verifyToken, async (req, res) => {
 router.get('/backups/config', verifyToken, (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
   try {
-    const configPath = require('path').join(__dirname, '../../../backup_config.json');
+    const configPath = require('path').join(__dirname, '../../backup_config.json');
     if (require('fs').existsSync(configPath)) {
       const data = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
       res.json(data);
@@ -756,7 +756,7 @@ router.post('/backup-schedule', verifyToken, async (req, res) => {
     else if (interval === 'Quarterly') cron = '0 2 1 */3 *'; // 1st of every 3 months 2AM
     
     // Write this to a config file for server.js to pick up, or env.json
-    const configPath = require('path').join(__dirname, '../../../backup_config.json');
+    const configPath = require('path').join(__dirname, '../../backup_config.json');
     require('fs').writeFileSync(configPath, JSON.stringify({ enabled, interval, cron }, null, 2));
     
     res.json({ success: true, enabled, interval, cron });

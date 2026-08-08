@@ -2457,7 +2457,7 @@ app.listen(PORT, HOST, async () => {
     let cronTime = BACKUP_CRON;
     let enabled = true;
     try {
-      const configPath = require('path').join(__dirname, '../../backup_config.json');
+      const configPath = require('path').join(__dirname, 'backup_config.json');
       if (require('fs').existsSync(configPath)) {
         const conf = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
         if (conf.enabled === false) enabled = false;
@@ -2484,7 +2484,7 @@ app.listen(PORT, HOST, async () => {
   scheduleBackup();
 
   try {
-    const configPath = require('path').join(__dirname, '../../backup_config.json');
+    const configPath = require('path').join(__dirname, 'backup_config.json');
     require('fs').watchFile(configPath, () => {
       console.log('[Cron] Backup config changed, rescheduling...');
       scheduleBackup();
