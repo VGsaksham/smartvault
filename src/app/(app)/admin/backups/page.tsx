@@ -169,7 +169,9 @@ export default function AdminBackupsPage() {
       });
       const data = await res.json();
       if (res.ok) setConfig(data);
-    } catch {
+      else setMessage("API returned error: " + data.error);
+    } catch (e: any) {
+      setMessage("Config fetch error: " + e.message);
     }
   }, [token]);
 
@@ -493,6 +495,7 @@ export default function AdminBackupsPage() {
       <div className="rounded-[14px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 space-y-4">
         <div className="flex items-center gap-2 font-bold text-[15px]"><Settings size={16} /> Auto-Backup Schedule</div>
         <p className="text-xs text-[var(--text-secondary)]">Configure automatic backups (currently configured in <code>backup_config.json</code>). Retention policies are disabled indefinitely as requested.</p>
+        <div className="text-xs text-red-500 font-mono">DEBUG CONFIG: {JSON.stringify(config)}</div>
         
         <div className="flex items-center gap-4 mt-3">
           <select 
