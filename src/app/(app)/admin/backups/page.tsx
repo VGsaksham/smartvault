@@ -163,7 +163,7 @@ export default function AdminBackupsPage() {
   const fetchConfig = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(apiUrl('/api/admin/backups/config'), {
+      const res = await fetch(apiUrl('/api/admin/backups/config?t=' + Date.now()), {
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store'
       });
