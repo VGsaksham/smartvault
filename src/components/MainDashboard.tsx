@@ -1208,8 +1208,18 @@ const toggleDarkMode = () => {
 
     setAlertConfig({ title: 'Downloading', message: 'Preparing your folder download...', isError: false });
     fetch(url, { headers: { 'Authorization': `Bearer ${token}` } })
-      .then(res => {
-        if (!res.ok) throw new Error("Download failed or no files found");
+      .then(async res => {
+        if (!res.ok) {
+            let msg = "Download failed or no files found";
+            try {
+                const errData = await res.json();
+                msg = errData.error || msg;
+            } catch(e) {
+                const text = await res.text();
+                msg = text || msg;
+            }
+            throw new Error(msg);
+        }
         return res.blob();
       }).then(blob => {
         const downloadUrl = window.URL.createObjectURL(blob);

@@ -2109,11 +2109,6 @@ app.get('/api/folder/download', verifyToken, async (req, res) => {
       query += ` AND (folder IS NULL OR folder = 'null' OR folder = 'undefined' OR folder = '')`;
     }
     
-    if (masterfolderId) {
-       query += ` AND company_id = $${paramCount}`;
-       values.push(parseInt(masterfolderId, 10));
-       paramCount++;
-    }
     
     const result = await pool.query(query, values);
     const filesToDownload = result.rows;

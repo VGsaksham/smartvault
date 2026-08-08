@@ -731,6 +731,21 @@ router.post('/backups/restore', verifyToken, async (req, res) => {
 });
 
 
+router.get('/backups/config', verifyToken, (req, res) => {
+  if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
+  try {
+    const configPath = require('path').join(__dirname, '../../../backup_config.json');
+    if (require('fs').existsSync(configPath)) {
+      const data = JSON.parse(require('fs').readFileSync(configPath, 'utf8'));
+      res.json(data);
+    } else {
+      res.json({ enabled: false, interval: 'Daily' });
+    }
+  } catch (err) {
+    res.json({ enabled: false, interval: 'Daily' });
+  }
+});
+
 router.post('/backup-schedule', verifyToken, async (req, res) => {
   if (req.user.role !== 'Admin') return res.status(403).json({ error: 'Admin only.' });
   try {
