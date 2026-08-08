@@ -131,27 +131,7 @@ export default function MainDashboard() {
 
   const [isDarkMode, setIsDarkMode] = useState(false);
   
-  const filteredFiles = Array.isArray(files) ? files.filter((file) => {
-    const matchesSearch = (file.original_name || '').toLowerCase().includes(searchQuery.toLowerCase());
-    let matchesType = true;
-    const mime = (file.mime_type || '').toLowerCase();
-    if (activeFilter === 'Images') matchesType = mime.includes('image');
-    else if (activeFilter === 'Documents') matchesType = mime.includes('pdf') || mime.includes('document') || mime.includes('text') || mime.includes('sheet') || mime.includes('word');
-    else if (activeFilter === 'Videos') matchesType = mime.includes('video');
-    const matchesDept = activeCategory === 'All files' || file.category === activeCategory;
-    let matchesFolder = true;
-    const isValidFolder = (f: string) => f && f !== 'null' && f !== 'undefined' && f !== '';
-    
-    if (activeCategory !== 'All files') {
-      if (activeFolder) {
-        matchesFolder = file.folder === activeFolder;
-      } else {
-        // Show files that have NO folder
-        matchesFolder = !isValidFolder(file.folder);
-      }
-    }
-    return matchesSearch && matchesType && matchesDept && matchesFolder;
-  }) : [];
+
 
   const goToSearchLocation = (file: any, segment: 'company' | 'fy' | 'category' | 'folder' | 'open') => {
     const params = new URLSearchParams(searchParams);
@@ -240,6 +220,28 @@ const toggleDarkMode = () => {
   const folderParam = searchParams.get('folder');
   
   const [activeFolder, setActiveFolder] = useState<string | null>(folderParam );
+
+  const filteredFiles = Array.isArray(files) ? files.filter((file) => {
+    const matchesSearch = (file.original_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+    let matchesType = true;
+    const mime = (file.mime_type || '').toLowerCase();
+    if (activeFilter === 'Images') matchesType = mime.includes('image');
+    else if (activeFilter === 'Documents') matchesType = mime.includes('pdf') || mime.includes('document') || mime.includes('text') || mime.includes('sheet') || mime.includes('word');
+    else if (activeFilter === 'Videos') matchesType = mime.includes('video');
+    const matchesDept = activeCategory === 'All files' || file.category === activeCategory;
+    let matchesFolder = true;
+    const isValidFolder = (f: string) => f && f !== 'null' && f !== 'undefined' && f !== '';
+    
+    if (activeCategory !== 'All files') {
+      if (activeFolder) {
+        matchesFolder = file.folder === activeFolder;
+      } else {
+        // Show files that have NO folder
+        matchesFolder = !isValidFolder(file.folder);
+      }
+    }
+    return matchesSearch && matchesType && matchesDept && matchesFolder;
+  }) : [];
 
   useEffect(() => {
     setActiveFolder(folderParam );
