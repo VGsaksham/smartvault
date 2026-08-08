@@ -888,7 +888,7 @@ const toggleDarkMode = () => {
       }
     }
 
-    for (let i = 0; i < fileList.length; i++) {
+    for (var i = 0; i < fileList.length; i++) {
       const { file, targetFolder, proposedName, proposedFolder } = fileList[i];
       setUploadProgress(0);
       setUploadText(`Uploading ${proposedName} (${i + 1} of ${fileList.length})...`);
@@ -1300,8 +1300,8 @@ const toggleDarkMode = () => {
       color: (() => {
         const palette = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-pink-500', 'bg-orange-500', 'bg-indigo-500', 'bg-teal-500'];
         const s = String(key || '');
-        let h = 0;
-        for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+        var h = 0;
+        for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
         return palette[h % palette.length] || 'bg-gray-500';
       })()
     }));
@@ -1325,7 +1325,7 @@ const toggleDarkMode = () => {
         if (f.category === activeCategory && f.folder && f.folder !== 'null' && f.folder !== 'undefined') {
           // Add every ancestor segment of the file's folder path
           const parts = String(f.folder).split('/');
-          for (let i = 1; i <= parts.length; i++) {
+          for (var i = 1; i <= parts.length; i++) {
             allPaths.add(parts.slice(0, i).join('/'));
           }
         }
