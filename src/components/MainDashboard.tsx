@@ -594,7 +594,7 @@ const toggleDarkMode = () => {
 
   // File type helpers
 
-  const CODE_EXTS = ['js','ts','tsx','jsx','py','sh','bash','json','yaml','yml','xml','html','css','scss','md','txt','log','env','ini','toml','csv'];
+  const CODE_EXTS = ['js','ts','tsx','jsx','py','sh','bash','json','yaml','yml','xml','html','css','scss','md','txt','log','env','ini','toml'];
   const isCodeFile = (name: string) => CODE_EXTS.includes((name.split('.').pop() || '').toLowerCase());
 
   // Build preview URL / text content based on selected file
@@ -659,7 +659,7 @@ const toggleDarkMode = () => {
       mime.includes('video') ||
       mime.includes('audio') ||
       mime.includes('pdf') ||
-      name.match(/\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/i)
+      name.match(/\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|csv)$/i)
     ) {
       fetchPreviewWithFallback()
         .then(handleProtectedResponse)

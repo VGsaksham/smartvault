@@ -1452,7 +1452,7 @@ app.get('/api/preview/:id', verifyToken, async (req, res) => {
     const originalName = fileRecord.original_name;
     const ext = path.extname(originalName).toLowerCase();
 
-    const PREVIEWABLE_OFFICE = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp'];
+    const PREVIEWABLE_OFFICE = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', '.csv'];
     const needsConversion = PREVIEWABLE_OFFICE.includes(ext);
 
     // Helper: write file buffer to a tmp file, convert, read result
