@@ -25,6 +25,12 @@ async function check() {
   } catch (err) {
     console.error("Error:", err);
   }
+  try {
+    const pm2Logs = execSync('pm2 logs sv-api --lines 30 --nostream', { encoding: 'utf-8' });
+    console.log(pm2Logs);
+  } catch (err) {
+    console.log("Could not fetch PM2 logs.", err.message);
+  }
 }
 
 check();
