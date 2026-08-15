@@ -3,29 +3,38 @@ const env = require('./src/config/env');
 
 const minioClient = new Minio.Client(env.MINIO);
 
-async function test() {
+async function run() {
   const bucket = 'smartvault-files';
-  const file = 'Sanyasi_Ayurveda/UnknownFY/Account/Sales/1786777197694-activity_report_1.csv';
-  
+  const testFile = 'test-file-' + Date.now() + '.txt';
+
   try {
-    console.log("Checking if bucket exists...");
-    const exists = await minioClient.bucketExists(bucket);
-    console.log("Bucket exists:", exists);
-    
-    console.log("Testing statObject...");
-    const stat = await minioClient.statObject(bucket, file);
+    console.log("1. Checking bucket...");
+    console.log("Bucket exists:", await minioClient.bucketExists(bucket));
+
+    console.log("2. Putting object...");
+    await minioClient.putObject(bucket, testFile, 'hello world');
+    console.log("Put object success!");
+
+    console.log("3. Stat object...");
+    const stat = await minioClient.statObject(bucket, testFile);
     console.log("Stat success:", stat);
 
-    console.log("Testing getObject...");
-    const stream = await minioClient.getObject(bucket, file);
-    let size = 0;
-    stream.on('data', c => size += c.length);
-    stream.on('end', () => console.log("Get success! Bytes read:", size));
-    stream.on('error', err => console.error("Stream error:", err));
+    console.log("4. Get object...");
+    const stream = await minioClient.getObject(bucket, testFile);
+    let data = '';
+    stream.on('data', chunk => data += chunk);
+    stream.on('end', () => console.log("Get success! Data:", data));
+    
+    // Also try stat on a non-existent file to see if it throws AccessDenied or NoSuchKey
+    try {
+      await minioClient.statObject(bucket, 'does-not-exist.txt');
+    } catch (err) {
+      console.log("Expected error for non-existent file:", err.code);
+    }
 
   } catch (err) {
-    console.error("Caught error:", err);
+    console.error("Test failed:", err);
   }
 }
 
-test();
+run();
