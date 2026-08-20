@@ -101,7 +101,7 @@ export default function CategoryDashboard({ category, masterfolderId }: { catego
     <div className="flex flex-col gap-4 md:gap-6 mb-6 md:mb-8">
       
       {/* Top Row: Storage, Cross-FY, Quick Actions */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
         
         {/* Storage Widget */}
         <div className="bg-[var(--bg-surface)] rounded-[18px] md:rounded-[22px] border border-[var(--border-subtle)] p-5 md:p-6 flex flex-col justify-between transition-all hover:shadow-[var(--shadow-medium)] min-h-[200px] md:h-[220px]">
