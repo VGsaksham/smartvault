@@ -26,11 +26,12 @@ async function run() {
     )
     SELECT * FROM all_folders f
     WHERE 1=1
-    AND (f.original_name ILIKE $2 OR COALESCE(f.user_alias, '') ILIKE $2)
-    AND f.category = $3
+    AND (f.original_name ILIKE $1 OR COALESCE(f.user_alias, '') ILIKE $1)
+    AND f.category = $2
+    ORDER BY CASE WHEN f.original_name ILIKE $3 THEN 0 ELSE 1 END ASC, f.upload_date DESC LIMIT 50
   `;
   try {
-    const res = await pool.query(query, [1, `%${q}%`, 'Management']);
+    const res = await pool.query(query, [`%${q}%`, 'Management', q]);
     console.table(res.rows);
   } catch (err) {
     console.error("ERROR:", err.message);

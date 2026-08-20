@@ -930,8 +930,8 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
         SELECT * FROM all_folders f
         WHERE 1=1
       `;
-      const values = [req.user.id];
-      let p = 2;
+      const values = [];
+      let p = 1;
       const queryText = String(q);
       const caseSensitive = String(matchCase) === 'true';
       const exactMatch = String(exact) === 'true';
