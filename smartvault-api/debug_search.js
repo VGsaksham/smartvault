@@ -7,13 +7,12 @@ async function run() {
       SELECT f.id, f.name as original_name, 'folder' as type,
              c.name as masterfolder_name, dept.name as category,
              parent.name as folder,
-             ufa.alias_name as user_alias, f.created_at as upload_date,
+             NULL as user_alias, f.created_at as upload_date,
              dept.masterfolder_id, dept.fy_id
       FROM masterfolder_category_folders f
       JOIN masterfolder_categories dept ON f.category_id = dept.id
       JOIN masterfolders c ON dept.masterfolder_id = c.id
       LEFT JOIN masterfolder_category_folders parent ON f.parent_folder_id = parent.id
-      LEFT JOIN user_folder_aliases ufa ON ufa.folder_id = f.id AND ufa.user_id = $1
       
       UNION ALL
       
