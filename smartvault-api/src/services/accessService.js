@@ -20,8 +20,13 @@ function checkFilePermission(user, fileRecord, action) {
     // Move: No
     if (action === 'MOVE') return false;
 
-    // Edit (Rename/Tag/Expiry) & Copy
-    if (['RENAME', 'TAG', 'EXPIRY', 'COPY'].includes(action)) {
+    // Copy: allowed for anything in their department
+    if (action === 'COPY') {
+      return isOwnDeptOrAllowed;
+    }
+
+    // Edit (Rename/Tag/Expiry)
+    if (['RENAME', 'TAG', 'EXPIRY'].includes(action)) {
       // Staff User: Own uploads only
       return fileRecord.uploaded_by === user.id;
     }

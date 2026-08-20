@@ -1801,7 +1801,7 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
     return res.status(400).json({ error: "Invalid bulk action" });
   }
 
-  const normalizedTargetDepartment = payload?.targetDepartment || payload?.target_department || payload?.destinationDepartment || null;
+  const normalizedTargetDepartment = payload?.targetCategory || payload?.target_category || payload?.destinationCategory || payload?.targetDepartment || payload?.target_department || payload?.destinationDepartment || null;
   const normalizedTargetFolder = payload?.targetFolder ?? payload?.target_folder ?? payload?.destinationFolder ?? null;
   const normalizedRenames = payload?.renames || payload?.renameMap || payload?.names || null;
   const normalizedFolders = payload?.folders || payload?.folderMap || payload?.paths || null;

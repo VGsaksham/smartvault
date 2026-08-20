@@ -52,11 +52,11 @@ router.get('/', verifyToken, async (req, res) => {
              ${userCols.has('role') ? 'u.role' : "'Staff'::text AS role"},
              ${userCols.has('category') ? 'u.category' : "NULL::text AS category"},
              ${userCols.has('allowed_categories') ? 'u.allowed_categories' : "ARRAY[]::text[] AS allowed_categories"},
-             ${userCols.has('can_bulk_move') ? 'COALESCE(u.can_bulk_move, true)' : 'true'} AS can_bulk_move,
-             ${userCols.has('can_bulk_copy') ? 'COALESCE(u.can_bulk_copy, true)' : 'true'} AS can_bulk_copy,
-             ${userCols.has('can_bulk_delete') ? 'COALESCE(u.can_bulk_delete, false)' : 'false'} AS can_bulk_delete,
-             ${userCols.has('can_bulk_rename') ? 'COALESCE(u.can_bulk_rename, true)' : 'true'} AS can_bulk_rename,
-             ${userCols.has('can_bulk_download') ? 'COALESCE(u.can_bulk_download, true)' : 'true'} AS can_bulk_download,
+             COALESCE(ub.can_bulk_move, u.can_bulk_move, true) AS can_bulk_move,
+             COALESCE(ub.can_bulk_copy, u.can_bulk_copy, true) AS can_bulk_copy,
+             COALESCE(ub.can_bulk_delete, u.can_bulk_delete, false) AS can_bulk_delete,
+             COALESCE(ub.can_bulk_rename, u.can_bulk_rename, true) AS can_bulk_rename,
+             COALESCE(ub.can_bulk_download, u.can_bulk_download, true) AS can_bulk_download,
              ${userCols.has('can_download_folders') ? 'COALESCE(u.can_download_folders, false)' : 'false'} AS can_download_folders,
              ${userCols.has('can_upload_to_allowed') ? 'COALESCE(u.can_upload_to_allowed, false)' : 'false'} AS can_upload_to_allowed,
              ${userCols.has('can_manage_structure') ? 'COALESCE(u.can_manage_structure, false)' : 'false'} AS can_manage_structure,
@@ -96,6 +96,7 @@ router.get('/', verifyToken, async (req, res) => {
         FROM user_folder_access ufa
         WHERE ufa.user_id = u.id
       ) fa ON TRUE` : ''}
+      LEFT JOIN user_bulk_permissions ub ON ub.user_id = u.id
       WHERE 1=1
     `;
     // Hide superadmin from Admin UI list (still exists in DB).
