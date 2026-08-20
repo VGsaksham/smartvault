@@ -1,6 +1,4 @@
-const { Pool } = require('pg');
-const env = require('./src/config/env');
-const pool = new Pool({ connectionString: env.DATABASE_URL });
+const pool = require('./src/db/pool');
 
 async function run() {
   const q = process.argv[2] || 'mng';
