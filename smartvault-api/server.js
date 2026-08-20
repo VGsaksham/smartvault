@@ -911,7 +911,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
                  c.name as masterfolder_name, dept.name as category,
                  parent.name as folder,
                  ufa.alias_name as user_alias, f.created_at as upload_date,
-                 dept.masterfolder_id, c.fy_id
+                 dept.masterfolder_id, dept.fy_id
           FROM masterfolder_category_folders f
           JOIN masterfolder_categories dept ON f.category_id = dept.id
           JOIN masterfolders c ON dept.masterfolder_id = c.id
@@ -924,7 +924,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
                  c.name as masterfolder_name, dept.name as category,
                  NULL as folder,
                  NULL as user_alias, dept.created_at as upload_date,
-                 dept.masterfolder_id, c.fy_id
+                 dept.masterfolder_id, dept.fy_id
           FROM masterfolder_categories dept
           JOIN masterfolders c ON dept.masterfolder_id = c.id
         )
@@ -945,9 +945,9 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
       if (normalizedCompanyId) { query += ` AND f.masterfolder_id = $${p++}`; values.push(normalizedCompanyId); }
       if (normalizedFyId) { query += ` AND f.fy_id = $${p++}`; values.push(normalizedFyId); }
 
-      if (scope === 'category' && category) {
+      if (scope === 'category' && categories) {
         query += ` AND f.category = $${p++}`;
-        values.push(category);
+        values.push(categories);
       } else if (scope === 'folder' && folder) {
         query += ` AND (f.folder = $${p++} OR f.folder ILIKE $${p++})`;
         values.push(folder, `${folder}%`);
@@ -1035,9 +1035,9 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
       query += ` AND m.masterfolder_id = $${p++}`;
       values.push(masterfolderId);
       companyFilterApplied = true;
-    } else if (scope === 'category' && category) {
+    } else if (scope === 'category' && categories) {
       query += ` AND f.category = $${p++}`;
-      values.push(category);
+      values.push(categories);
     } else if (scope === 'folder' && folder) {
       query += ` AND (f.folder = $${p++} OR f.folder ILIKE $${p++})`;
       values.push(folder, `${folder}%`);
