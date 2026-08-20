@@ -911,7 +911,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
                  c.name as masterfolder_name, dept.name as category,
                  parent.name as folder,
                  NULL as user_alias, f.created_at as upload_date,
-                 dept.masterfolder_id, dept.fy_id
+                 dept.masterfolder_id
           FROM masterfolder_category_folders f
           JOIN masterfolder_categories dept ON f.category_id = dept.id
           JOIN masterfolders c ON dept.masterfolder_id = c.id
@@ -923,7 +923,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
                  c.name as masterfolder_name, dept.name as category,
                  NULL as folder,
                  NULL as user_alias, dept.created_at as upload_date,
-                 dept.masterfolder_id, dept.fy_id
+                 dept.masterfolder_id
           FROM masterfolder_categories dept
           JOIN masterfolders c ON dept.masterfolder_id = c.id
         )
@@ -942,7 +942,7 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
       p++;
 
       if (normalizedCompanyId) { query += ` AND f.masterfolder_id = $${p++}`; values.push(normalizedCompanyId); }
-      if (normalizedFyId) { query += ` AND f.fy_id = $${p++}`; values.push(normalizedFyId); }
+      // Folders do not belong to a financial year, so we do not filter by normalizedFyId.
 
       if (scope === 'category' && categories) {
         query += ` AND f.category = $${p++}`;

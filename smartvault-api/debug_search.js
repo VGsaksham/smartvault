@@ -8,7 +8,7 @@ async function run() {
              c.name as masterfolder_name, dept.name as category,
              parent.name as folder,
              NULL as user_alias, f.created_at as upload_date,
-             dept.masterfolder_id, dept.fy_id
+             dept.masterfolder_id
       FROM masterfolder_category_folders f
       JOIN masterfolder_categories dept ON f.category_id = dept.id
       JOIN masterfolders c ON dept.masterfolder_id = c.id
@@ -20,7 +20,7 @@ async function run() {
              c.name as masterfolder_name, dept.name as category,
              NULL as folder,
              NULL as user_alias, dept.created_at as upload_date,
-             dept.masterfolder_id, dept.fy_id
+             dept.masterfolder_id
       FROM masterfolder_categories dept
       JOIN masterfolders c ON dept.masterfolder_id = c.id
     )
