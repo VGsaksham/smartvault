@@ -17,8 +17,10 @@ function checkFilePermission(user, fileRecord, action) {
   }
 
   if (user.role === 'Staff') {
-    // Move: No
-    if (action === 'MOVE') return false;
+    // Move: allowed if they have the can_bulk_move permission and it's their department
+    if (action === 'MOVE') {
+      return user.can_bulk_move === true && isOwnDeptOrAllowed;
+    }
 
     // Copy: allowed for anything in their department
     if (action === 'COPY') {

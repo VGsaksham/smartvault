@@ -11,14 +11,14 @@ const verifyToken = async (req, res, next) => {
     if (err) return res.status(403).json({ error: 'Invalid or expired token.' });
     try {
       const { rows } = await pool.query(
-        'SELECT status, token_version FROM users WHERE id = $1 LIMIT 1',
+        'SELECT status, token_version, can_manage_structure FROM users WHERE id = $1 LIMIT 1',
         [user.id]
       );
       if (rows.length === 0) return res.status(403).json({ error: 'User not found.' });
       if (rows[0].status === 'Suspended') return res.status(403).json({ error: 'Your account is suspended.' });
       if (rows[0].token_version !== user.token_version)
         return res.status(403).json({ error: 'Session expired. Please log in again.' });
-      req.user = user;
+      req.user = { ...user, can_manage_structure: rows[0].can_manage_structure };
       next();
     } catch (dbErr) {
       console.error('Token verification DB error:', dbErr.message);

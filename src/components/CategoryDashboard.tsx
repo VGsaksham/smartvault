@@ -115,22 +115,19 @@ export default function CategoryDashboard({ category, masterfolderId }: { catego
             <div className="text-[30px] sm:text-[36px] font-bold tracking-[-0.03em] text-[var(--text-primary)] flex items-baseline">
               {usedGb} <span className="text-[14px] font-bold text-[var(--text-tertiary)] ml-2 uppercase">GB</span>
             </div>
-            <div className="flex items-center gap-3 mt-2">
-              <span className="text-[11px] font-semibold text-[var(--text-secondary)] px-2 py-0.5 bg-[var(--bg-neutral)] rounded-full">Cloud: {minioGb}GB</span>
-              <span className="text-[11px] font-semibold text-[var(--text-secondary)] px-2 py-0.5 bg-[var(--bg-neutral)] rounded-full">Local: {localGb}GB</span>
+            <div className="flex items-center gap-4 flex-wrap mt-3">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <HardDrive size={15} className="text-[#34c759] shrink-0" />
+                <p className="text-[12px] text-[var(--text-secondary)] whitespace-nowrap"><strong className="text-[var(--text-primary)]">{localGb}GB</strong> Local</p>
+              </div>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <UploadCloud size={15} className="text-[#007aff] shrink-0" />
+                <p className="text-[12px] text-[var(--text-secondary)] whitespace-nowrap"><strong className="text-[var(--text-primary)]">{minioGb}GB</strong> Cloud</p>
+              </div>
             </div>
           </div>
-          <div>
-            <div className="flex justify-between text-[11px] font-semibold text-[var(--text-secondary)] mb-1.5">
-              <span>{usagePercent.toFixed(1)}% of {quotaGb}GB Quota</span>
-              <span>{storage.total_files} files</span>
-            </div>
-            <div className="w-full bg-[var(--bg-neutral)] h-2 rounded-full overflow-hidden border border-[var(--border-subtle)]">
-              <div 
-                className={`h-full rounded-full transition-all duration-1000 ${usagePercent > 90 ? 'bg-[#ff5b52]' : usagePercent > 70 ? 'bg-[#ff9500]' : 'bg-[var(--accent)]'}`}
-                style={{ width: `${usagePercent}%` }}
-              ></div>
-            </div>
+          <div className="text-[11px] font-semibold text-[var(--text-secondary)]">
+            Total: {storage.total_files} files
           </div>
         </div>
 

@@ -1,0 +1,5 @@
+{
+  "enabled": false,
+  "interval": "Disabled",
+  "cron": "0 2 * * *"
+}

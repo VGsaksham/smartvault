@@ -394,6 +394,7 @@ const toggleDarkMode = () => {
   const [userAllowedDepts, setUserAllowedDepts] = useState<string[]>([]);
   const [userId, setUserId] = useState<number | null>(null);
   const [canDownloadFolders, setCanDownloadFolders] = useState(false);
+  const [canBulkMove, setCanBulkMove] = useState(false);
   const [storageOverview, setStorageOverview] = useState<any | null>(null);
   const [structureCategories, setStructureCategories] = useState<StructureCategory[]>([]);
   const confirm = useConfirm();
@@ -419,6 +420,7 @@ const toggleDarkMode = () => {
         setUserAllowedDepts([...new Set(allAllowed)] as string[]);
         setUserId(parsedUser?.id || payload.id);
         setCanDownloadFolders(parsedUser?.can_download_folders || false);
+        setCanBulkMove(parsedUser?.can_bulk_move !== false && payload?.can_bulk_move !== false);
       } catch (e) {
         console.error('Invalid token payload', e);
         localStorage.clear();
@@ -2531,7 +2533,7 @@ const renderSearchPath = (file: any) => {
               <button onClick={() => setSelectedFileIds(filteredFiles.map((f: any) => f.id))} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
                 <CheckSquare size={15} /> Select All
               </button>
-              {userRole !== 'Staff' && (
+              {canBulkMove && (
                 <button onClick={() => setShowBulkMoveModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
                   <FolderInput size={15} /> Move
                 </button>

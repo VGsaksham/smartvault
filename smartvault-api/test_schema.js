@@ -1,0 +1,1 @@
+const { Pool } = require('pg'); const pool = new Pool({ connectionString: 'postgresql://postgres:postgres@localhost:5432/smartvault_db' }); async function run() { const result = await pool.query(\SELECT column_name, column_default FROM information_schema.columns WHERE table_name = 'users' AND column_name LIKE 'can_%'\); console.log(result.rows); pool.end(); } run();

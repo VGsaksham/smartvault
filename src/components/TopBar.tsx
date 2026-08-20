@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { Search, User, Menu, X, Calendar } from 'lucide-react';
+import { Search, User, Menu, X, Calendar, Folder, FileText } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
 import { useSidebar } from '@/context/SidebarContext';
 
@@ -254,12 +254,20 @@ export default function TopBar() {
   const openResultLocation = (file: any, openPreview = false) => {
     const params = new URLSearchParams(searchParams);
     if (file.masterfolder_id) params.set('masterfolderId', String(file.masterfolder_id));
-    if (file.fy_id) params.set('null', String(file.fy_id));
+    if (file.fy_id) params.set('fyId', String(file.fy_id));
     if (file.category) params.set('category', file.category);
-    if (file.folder) params.set('folder', file.folder);
-    params.set('focusFileId', String(file.id));
-    if (openPreview) params.set('openFileId', String(file.id));
-    else params.delete('openFileId');
+    
+    if (file.type === 'folder') {
+       // If it's a folder result, the "folder" we navigate to should be its full path or just the name if root
+       const targetFolder = file.folder ? `${file.folder}/${file.original_name}` : file.original_name;
+       params.set('folder', targetFolder);
+    } else {
+       if (file.folder) params.set('folder', file.folder);
+       params.set('focusFileId', String(file.id));
+       if (openPreview) params.set('openFileId', String(file.id));
+       else params.delete('openFileId');
+    }
+    
     params.delete('q');
     params.delete('scope');
     setIsSearchOpen(false);
@@ -423,6 +431,7 @@ export default function TopBar() {
                   ['audio', 'Audio'],
                   ['images', 'Images'],
                   ['design', 'Design'],
+                  ['folders', 'Folders'],
                 ].map(([key, label]) => (
                   <button
                     key={key}
@@ -514,14 +523,17 @@ export default function TopBar() {
                     onDoubleClick={() => openResultLocation(file, true)}
                     className="px-4 py-3 border-b border-[var(--border-subtle)] last:border-b-0 hover:bg-[var(--bg-neutral)] transition-colors cursor-pointer"
                   >
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
-                        {file.user_alias || file.custom_name || file.original_name}
-                      </p>
-                    </div>
-                    <div className="mt-1 text-[11px] text-[var(--text-tertiary)] flex flex-wrap items-center gap-1">
-                      <span>{file.masterfolder_name || '-'}</span><span>›</span><span>{file.category || '-'}</span>
-                      {file.folder && (<><span>›</span><span>{file.folder}</span></>)}
+                    <div className="flex items-center gap-3">
+                      {file.type === 'folder' ? <Folder size={16} className="text-[#007aff]" /> : <FileText size={16} className="text-[var(--text-tertiary)]" />}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
+                          {file.user_alias || file.custom_name || file.original_name}
+                        </p>
+                        <div className="mt-1 text-[11px] text-[var(--text-tertiary)] flex flex-wrap items-center gap-1">
+                          <span>{file.masterfolder_name || '-'}</span><span>›</span><span>{file.category || '-'}</span>
+                          {file.folder && (<><span>›</span><span>{file.folder}</span></>)}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))
