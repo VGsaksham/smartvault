@@ -131,33 +131,7 @@ export default function CategoryDashboard({ category, masterfolderId }: { catego
           </div>
         </div>
 
-        {/* Cross-FY Comparison */}
-        <div className="bg-[var(--bg-surface)] rounded-[18px] md:rounded-[22px] border border-[var(--border-subtle)] p-5 md:p-6 flex flex-col justify-between transition-all hover:shadow-[var(--shadow-medium)] min-h-[200px] md:h-[220px]">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.1em]">Cross-FY Comparison</span>
-            <div className="w-8 h-8 rounded-full bg-[#34c75915] flex items-center justify-center">
-              <BarChart3 size={16} className="text-[#34c759]" />
-            </div>
-          </div>
-          
-          <div className="flex items-center justify-between mt-4">
-            <div>
-              <p className="text-[12px] font-semibold text-[var(--text-secondary)] mb-1 uppercase tracking-wider">Previous FY</p>
-              <p className="text-[20px] font-bold text-[var(--text-primary)] leading-none">{formatBytes(stats?.cross_fy?.previous?.total_size ?? 0)}</p>
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{stats?.cross_fy?.previous?.total_files ?? 0} files</p>
-            </div>
-            <div className="w-[1px] h-12 bg-[var(--border-subtle)] mx-2"></div>
-            <div>
-              <p className="text-[12px] font-semibold text-[var(--accent)] mb-1 uppercase tracking-wider">Current FY</p>
-              <p className="text-[20px] font-bold text-[var(--text-primary)] leading-none">{formatBytes(stats?.cross_fy?.current?.total_size ?? 0)}</p>
-              <p className="text-[12px] text-[var(--text-tertiary)] mt-1">{stats?.cross_fy?.current?.total_files ?? 0} files</p>
-            </div>
-          </div>
 
-          <div className={`mt-4 text-[13px] font-semibold flex items-center gap-1.5 ${growth >= 0 ? 'text-[#ff9500]' : 'text-[#34c759]'}`}>
-            {growth >= 0 ? '↑' : '↓'} {Math.abs(growth).toFixed(1)}% {growth >= 0 ? 'growth' : 'reduction'} vs last FY
-          </div>
-        </div>
 
         {/* Quick Actions */}
         <div className="bg-[var(--bg-surface)] rounded-[18px] md:rounded-[22px] border border-[var(--border-subtle)] p-5 md:p-6 flex flex-col transition-all hover:shadow-[var(--shadow-medium)] min-h-[200px] md:h-[220px]">
