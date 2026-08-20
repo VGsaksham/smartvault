@@ -1,5 +1,5 @@
 const { Pool } = require('pg');
-const env = require('./smartvault-api/src/config/env');
+const env = require('./src/config/env');
 const pool = new Pool({ connectionString: env.DATABASE_URL });
 
 async function run() {
