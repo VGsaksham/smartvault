@@ -261,6 +261,8 @@ export default function TopBar() {
        // If it's a folder result, the "folder" we navigate to should be its full path or just the name if root
        const targetFolder = file.folder ? `${file.folder}/${file.original_name}` : file.original_name;
        params.set('folder', targetFolder);
+    } else if (file.type === 'category') {
+       params.delete('folder');
     } else {
        if (file.folder) params.set('folder', file.folder);
        params.set('focusFileId', String(file.id));

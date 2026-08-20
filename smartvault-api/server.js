@@ -906,15 +906,29 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
 
     if (String(fileType).toLowerCase() === 'folders') {
       let query = `
-        SELECT f.id, f.name as original_name, 'folder' as type,
-               c.name as masterfolder_name, dept.name as category,
-               parent.name as folder,
-               ufa.alias_name as user_alias, f.created_at as upload_date
-        FROM masterfolder_category_folders f
-        JOIN masterfolder_categories dept ON f.category_id = dept.id
-        JOIN masterfolders c ON dept.masterfolder_id = c.id
-        LEFT JOIN masterfolder_category_folders parent ON f.parent_folder_id = parent.id
-        LEFT JOIN user_folder_aliases ufa ON ufa.folder_id = f.id AND ufa.user_id = $1
+        WITH all_folders AS (
+          SELECT f.id, f.name as original_name, 'folder' as type,
+                 c.name as masterfolder_name, dept.name as category,
+                 parent.name as folder,
+                 ufa.alias_name as user_alias, f.created_at as upload_date,
+                 dept.masterfolder_id, dept.fy_id
+          FROM masterfolder_category_folders f
+          JOIN masterfolder_categories dept ON f.category_id = dept.id
+          JOIN masterfolders c ON dept.masterfolder_id = c.id
+          LEFT JOIN masterfolder_category_folders parent ON f.parent_folder_id = parent.id
+          LEFT JOIN user_folder_aliases ufa ON ufa.folder_id = f.id AND ufa.user_id = $1
+          
+          UNION ALL
+          
+          SELECT dept.id, dept.name as original_name, 'category' as type,
+                 c.name as masterfolder_name, dept.name as category,
+                 NULL as folder,
+                 NULL as user_alias, dept.created_at as upload_date,
+                 dept.masterfolder_id, dept.fy_id
+          FROM masterfolder_categories dept
+          JOIN masterfolders c ON dept.masterfolder_id = c.id
+        )
+        SELECT * FROM all_folders f
         WHERE 1=1
       `;
       const values = [req.user.id];
@@ -924,16 +938,16 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
       const exactMatch = String(exact) === 'true';
       const comparator = caseSensitive ? 'LIKE' : 'ILIKE';
       const qValue = exactMatch ? queryText : `%${queryText}%`;
-      query += ` AND (f.name ${comparator} $${p} OR ufa.alias_name ${comparator} $${p})`;
+      query += ` AND (f.original_name ${comparator} $${p} OR COALESCE(f.user_alias, '') ${comparator} $${p})`;
       values.push(qValue);
       p++;
 
-      if (normalizedCompanyId) { query += ` AND dept.masterfolder_id = $${p++}`; values.push(normalizedCompanyId); }
-      if (normalizedFyId) { query += ` AND dept.fy_id = $${p++}`; values.push(normalizedFyId); }
+      if (normalizedCompanyId) { query += ` AND f.masterfolder_id = $${p++}`; values.push(normalizedCompanyId); }
+      if (normalizedFyId) { query += ` AND f.fy_id = $${p++}`; values.push(normalizedFyId); }
 
       query += ` ORDER BY 
-        CASE WHEN f.name ILIKE $${p} THEN 0 ELSE 1 END ASC,
-        f.created_at DESC LIMIT 50`;
+        CASE WHEN f.original_name ILIKE $${p} THEN 0 ELSE 1 END ASC,
+        f.upload_date DESC LIMIT 50`;
       values.push(String(q));
       const result = await pool.query(query, values);
       return res.json(result.rows);
@@ -1093,6 +1107,30 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
 
 
 // GET SINGLE File Metadata (Secure) — after starred/recent/search literals
+app.get('/api/files/debug-search', verifyToken, async (req, res) => {
+  const { q } = req.query;
+  const p = 1;
+  const query = `
+    SELECT f.id, f.original_name, f.custom_name, ufa.alias_name, f.auto_name,
+      split_part(f.original_name, '.', 1) as split_name,
+      CASE WHEN split_part(f.original_name, '.', 1) ILIKE $${p} THEN 0
+           WHEN f.custom_name ILIKE $${p} THEN 0
+           WHEN ufa.alias_name ILIKE $${p} THEN 0
+           ELSE 1 END as priority,
+      f.upload_date
+    FROM vault_files f
+    LEFT JOIN user_file_aliases ufa ON ufa.file_id = f.id AND ufa.user_id = $2
+    WHERE f.original_name ILIKE $3 OR f.custom_name ILIKE $3 OR f.auto_name ILIKE $3 OR ufa.alias_name ILIKE $3
+    ORDER BY priority ASC, f.upload_date DESC LIMIT 20
+  `;
+  try {
+    const result = await pool.query(query, [q, req.user.id, `%${q}%`]);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/files/:id', verifyToken, async (req, res) => {
   if (!/^\d+$/.test(String(req.params.id))) {
     return res.status(404).json({ error: 'File not found' });
