@@ -650,7 +650,7 @@ const toggleDarkMode = () => {
       return null;
     };
 
-    if (isCodeFile(name) || mime.includes('text')) {
+    if (isCodeFile(name) || mime.includes('text') || name.toLowerCase().endsWith('.csv')) {
       fetchPreviewWithFallback()
         .then(handleProtectedResponse)
         .then(r => (r ? r.text() : null))
@@ -659,9 +659,7 @@ const toggleDarkMode = () => {
     } else if (
       mime.includes('image') ||
       mime.includes('video') ||
-      mime.includes('audio') ||
-      mime.includes('pdf') ||
-      name.match(/\.(doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|csv)$/i)
+      mime.includes('audio')
     ) {
       fetchPreviewWithFallback()
         .then(handleProtectedResponse)
@@ -672,6 +670,19 @@ const toggleDarkMode = () => {
           setPreviewUrl(url);
         })
         .catch(err => console.error('Binary preview failed:', err));
+    } else if (
+      mime.includes('pdf') ||
+      name.match(/\.(pdf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp)$/i)
+    ) {
+      // Check permissions first without downloading the entire file body. 
+      // If allowed, use the direct URL so Chrome's PDF viewer works natively 
+      // instead of using a blob: URL which triggers Windows download blocks.
+      fetchPreviewWithFallback()
+        .then(handleProtectedResponse)
+        .then(r => {
+          if (r) setPreviewUrl(apiUrl(`/api/preview/${selectedFile.id}?token=${encodeURIComponent(token)}`));
+        })
+        .catch(err => console.error('PDF preview failed:', err));
     }
 
     return () => { if (url) URL.revokeObjectURL(url); };
