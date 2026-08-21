@@ -1590,7 +1590,7 @@ app.get(['/api/preview/:id', '/api/preview/:id/:filename'], verifyToken, async (
     if (needsConversion) {
       const pdfBuffer = await convertToPdf(fileBuffer, ext);
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', 'inline');
+      res.setHeader('Content-Disposition', `inline; filename="preview_${path.parse(fileRecord.original_name).name}.pdf"`);
       res.setHeader('Content-Length', pdfBuffer.length);
       return res.send(pdfBuffer);
     }
@@ -1601,7 +1601,7 @@ app.get(['/api/preview/:id', '/api/preview/:id/:filename'], verifyToken, async (
     if (ext2 === '.pdf' && finalMimeType === 'application/octet-stream') finalMimeType = 'application/pdf';
 
     res.setHeader('Content-Type', finalMimeType);
-    res.setHeader('Content-Disposition', 'inline');
+    res.setHeader('Content-Disposition', `inline; filename="${fileRecord.original_name}"`);
     res.setHeader('Content-Length', fileBuffer.length);
     return res.send(fileBuffer);
 
