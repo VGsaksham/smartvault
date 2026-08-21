@@ -1541,7 +1541,7 @@ app.get('/api/preview/:id', verifyToken, async (req, res) => {
     const originalName = fileRecord.original_name;
     const ext = path.extname(originalName).toLowerCase();
 
-    const PREVIEWABLE_OFFICE = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp', '.csv'];
+    const PREVIEWABLE_OFFICE = ['.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp'];
     const needsConversion = PREVIEWABLE_OFFICE.includes(ext);
 
     // Helper: write file buffer to a tmp file, convert, read result
@@ -2025,6 +2025,11 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
             prev_folder: fileRecord.folder ?? null,
           });
           if (!normalizedRenames || normalizedRenames[fileId] === undefined) throw new Error("New name required for all files");
+          let newName = String(normalizedRenames[fileId]).trim();
+          const oldExt = path.extname(fileRecord.original_name);
+          if (oldExt && !newName.toLowerCase().endsWith(oldExt.toLowerCase())) {
+            newName += oldExt;
+          }
           let nextFolder = fileRecord.folder ?? null;
           if (normalizedFolders && Object.prototype.hasOwnProperty.call(normalizedFolders, fileId)) {
             const raw = normalizedFolders[fileId];
@@ -2041,7 +2046,7 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
           }
           await client.query(
             'UPDATE vault_files SET original_name = $1, custom_name = $1, folder = $2 WHERE id = $3',
-            [normalizedRenames[fileId], nextFolder, fileId]
+            [newName, nextFolder, fileId]
           );
           break;
         case 'TAG':

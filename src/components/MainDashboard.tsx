@@ -833,9 +833,15 @@ const toggleDarkMode = () => {
             return prevName === item.file.name;
           });
           if (!row) return item;
-          const nextName = getCsvCell(headers, row, 'new_name') || item.proposedName;
+          let nextName = getCsvCell(headers, row, 'new_name') || item.proposedName;
+          if (nextName) {
+            const extMatch = item.file.name.match(/\.[^.]+$/);
+            if (extMatch && !nextName.toLowerCase().endsWith(extMatch[0].toLowerCase())) {
+              nextName += extMatch[0];
+            }
+          }
           const nextPathRaw = getCsvCell(headers, row, 'new_path');
-          const nextFolder = nextPathRaw === '' ? '' : nextPathRaw;
+          const nextFolder = nextPathRaw === '' ? '' : (nextPathRaw || item.proposedFolder);
           updated++;
           return { ...item, proposedName: nextName, proposedFolder: nextFolder };
         })
