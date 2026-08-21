@@ -680,7 +680,10 @@ const toggleDarkMode = () => {
       fetchPreviewWithFallback()
         .then(handleProtectedResponse)
         .then(r => {
-          if (r) setPreviewUrl(apiUrl(`/api/preview/${selectedFile.id}?token=${encodeURIComponent(token)}`));
+          if (r) {
+            const safeName = encodeURIComponent(selectedFile.original_name || 'preview.pdf');
+            setPreviewUrl(apiUrl(`/api/preview/${selectedFile.id}/${safeName}?token=${encodeURIComponent(token)}`));
+          }
         })
         .catch(err => console.error('PDF preview failed:', err));
     }
