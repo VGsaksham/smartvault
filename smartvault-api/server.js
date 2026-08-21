@@ -984,7 +984,11 @@ app.get('/api/files/search', verifyToken, async (req, res) => {
     const exactMatch = String(exact) === 'true';
     const comparator = caseSensitive ? 'LIKE' : 'ILIKE';
     const qValue = exactMatch ? queryText : `%${queryText}%`;
-    query += ` AND (f.original_name ${comparator} $${p} OR COALESCE(f.custom_name, '') ${comparator} $${p} OR COALESCE(f.auto_name, '') ${comparator} $${p} OR COALESCE(ufa.alias_name, '') ${comparator} $${p})`;
+    let nameSearchClause = `f.original_name ${comparator} $${p} OR COALESCE(f.custom_name, '') ${comparator} $${p} OR COALESCE(ufa.alias_name, '') ${comparator} $${p}`;
+    if (queryText.includes('-')) {
+      nameSearchClause += ` OR COALESCE(f.auto_name, '') ${comparator} $${p}`;
+    }
+    query += ` AND (${nameSearchClause})`;
     values.push(qValue);
     p++;
 
@@ -1592,7 +1596,11 @@ app.get('/api/preview/:id', verifyToken, async (req, res) => {
     }
 
     // Serve PDF or other files directly
-    res.setHeader('Content-Type', fileRecord.mime_type || 'application/octet-stream');
+    const ext2 = path.extname(fileRecord.original_name || '').toLowerCase();
+    let finalMimeType = fileRecord.mime_type || 'application/octet-stream';
+    if (ext2 === '.pdf' && finalMimeType === 'application/octet-stream') finalMimeType = 'application/pdf';
+
+    res.setHeader('Content-Type', finalMimeType);
     res.setHeader('Content-Disposition', 'inline');
     res.setHeader('Content-Length', fileBuffer.length);
     return res.send(fileBuffer);
@@ -1747,7 +1755,10 @@ app.get('/api/public/preview/:id', async (req, res) => {
       return res.send(pdfBuffer);
     }
 
-    res.setHeader('Content-Type', fileRecord.mime_type || 'application/octet-stream');
+    let finalMimeType = fileRecord.mime_type || 'application/octet-stream';
+    if (ext === '.pdf' && finalMimeType === 'application/octet-stream') finalMimeType = 'application/pdf';
+
+    res.setHeader('Content-Type', finalMimeType);
     res.setHeader('Content-Disposition', `inline; filename="${originalName}"`);
     res.send(fileBuffer);
   } catch (error) {
@@ -1761,7 +1772,7 @@ app.get(/^\/api\/download\/(.+)$/, verifyToken, async (req, res) => {
     const minioFilename = req.params[0];
     await hydrateRequestUser(req);
     // Check Database Privacy First
-    const fileResult = await pool.query('SELECT category FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
+    const fileResult = await pool.query('SELECT category, original_name, mime_type FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
     if (fileResult.rows.length === 0) return res.status(404).json({ error: "File not found in database" });
 
     const fileRecord = fileResult.rows[0];
@@ -1771,6 +1782,9 @@ app.get(/^\/api\/download\/(.+)$/, verifyToken, async (req, res) => {
 
     const isLocal = minioFilename.startsWith('local:');
     const actualFileName = isLocal ? minioFilename.substring(6) : minioFilename;
+    const ext = path.extname(fileRecord.original_name || '').toLowerCase();
+    let finalMimeType = fileRecord.mime_type || 'application/octet-stream';
+    if (ext === '.pdf' && finalMimeType === 'application/octet-stream') finalMimeType = 'application/pdf';
 
     if (isLocal) {
       if (!isMediaDriveAvailable()) {
@@ -1778,11 +1792,13 @@ app.get(/^\/api\/download\/(.+)$/, verifyToken, async (req, res) => {
       }
       const fullPath = path.join(EXTERNAL_DRIVE_PATH, actualFileName);
       const stat = await fs.promises.stat(fullPath);
+      res.setHeader('Content-Type', finalMimeType);
       res.setHeader('Content-Length', stat.size);
       const dataStream = fs.createReadStream(fullPath);
       dataStream.pipe(res);
     } else {
       const stat = await minioClient.statObject(FILE_BUCKET, actualFileName);
+      res.setHeader('Content-Type', finalMimeType);
       res.setHeader('Content-Length', stat.size);
       const dataStream = await minioClient.getObject(FILE_BUCKET, actualFileName);
       dataStream.pipe(res);
@@ -1796,7 +1812,7 @@ app.get(/^\/api\/download\/(.+)$/, verifyToken, async (req, res) => {
 app.get(/^\/api\/public\/download\/(.+)$/, async (req, res) => {
   try {
     const minioFilename = req.params[0];
-    const fileResult = await pool.query('SELECT original_name, category FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
+    const fileResult = await pool.query('SELECT original_name, category, mime_type FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
 
     const fileRecord = fileResult.rows[0];
@@ -1804,10 +1820,15 @@ app.get(/^\/api\/public\/download\/(.+)$/, async (req, res) => {
     const isLocal = minioFilename.startsWith('local:');
     const actualName = isLocal ? minioFilename.substring(6) : minioFilename;
 
+    const ext = path.extname(originalName || '').toLowerCase();
+    let finalMimeType = fileRecord.mime_type || 'application/octet-stream';
+    if (ext === '.pdf' && finalMimeType === 'application/octet-stream') finalMimeType = 'application/pdf';
+
     if (isLocal) {
       if (!isMediaDriveAvailable()) return storageUnavailableResponse(res, 'Media drive (EXTERNAL_DRIVE_PATH)', EXTERNAL_DRIVE_PATH);
       const localPath = path.join(EXTERNAL_DRIVE_PATH, actualName);
       if (!fs.existsSync(localPath)) return res.status(404).json({ error: 'Local file missing' });
+      res.setHeader('Content-Type', finalMimeType);
       res.download(localPath, originalName);
     } else {
       const stat = await minioClient.statObject(FILE_BUCKET, actualName);
