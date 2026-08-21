@@ -1526,7 +1526,7 @@ const { execFile } = require('child_process');
 const os = require('os');
 
 // Preview endpoint: serves file as PDF (converts Office docs via LibreOffice)
-app.get('/api/preview/:id/:filename?', verifyToken, async (req, res) => {
+app.get(['/api/preview/:id', '/api/preview/:id/:filename'], verifyToken, async (req, res) => {
   try {
     await hydrateRequestUser(req);
     const fileResult = await pool.query(
@@ -1692,7 +1692,7 @@ app.get('/api/stream/:id', verifyToken, async (req, res) => {
 });
 
 // Public Preview endpoint (serves PDF/media without token)
-app.get('/api/public/preview/:id/:filename?', async (req, res) => {
+app.get(['/api/public/preview/:id', '/api/public/preview/:id/:filename'], async (req, res) => {
   try {
     const fileResult = await pool.query(
       'SELECT minio_filename, original_name, mime_type, category FROM vault_files WHERE id = $1 LIMIT 1',
