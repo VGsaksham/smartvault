@@ -292,35 +292,32 @@ function buildFileAccessCondition(user, masterfolderId, startParam) {
   let paramCount = startParam;
   
   const cidFilter = Number.isFinite(Number(masterfolderId)) ? Number(masterfolderId) : null;
-  const masterfolderRows = Array.isArray(user?.masterfolder_access) ? user.masterfolder_access : [];
   const folderRows = Array.isArray(user?.folder_access) ? user.folder_access : [];
   
-  let fullDepts = new Set();
-  for (const x of masterfolderRows) {
-    const cid = Number(x.masterfolder_id);
-    if (cidFilter !== null && cid !== cidFilter) continue;
-    if (!Number.isFinite(cid)) continue;
-    const d = String(x?.category || '').trim();
-    if (d) fullDepts.add(d);
-  }
-  
-  if (fullDepts.size === 0) {
-    const primaryDept = String(user?.category || '').trim();
-    if (primaryDept) fullDepts.add(primaryDept);
-
-    const legacy = Array.isArray(user?.allowed_categories) ? user.allowed_categories : [];
-    for (const d of legacy) {
-      if (String(d).trim()) fullDepts.add(String(d).trim());
-    }
-  }
+  // 1. Calculate category-level access
+  const deptScope = getAllowedDepartmentsForMasterfolder(user, cidFilter);
   
   let clauses = [];
   
-  if (fullDepts.size > 0) {
+  // Category clause
+  if (deptScope.hasAll) {
+    if (deptScope.exclusions.length > 0) {
+      clauses.push(`NOT f.category = ANY($${paramCount++})`);
+      values.push(deptScope.exclusions);
+    } else {
+      clauses.push(`1=1`); // access to all categories
+    }
+  } else if (deptScope.allowed.length > 0) {
     clauses.push(`f.category = ANY($${paramCount++})`);
-    values.push(Array.from(fullDepts));
+    values.push(deptScope.allowed);
+  } else {
+    clauses.push(`1=0`); // no category access
   }
   
+  let mainCategorySql = clauses[0];
+  
+  // 2. Calculate folder-level access
+  let folderClauses = [];
   for (const x of folderRows) {
     if (x.is_exclusion) continue;
     const cid = Number(x.masterfolder_id);
@@ -328,17 +325,21 @@ function buildFileAccessCondition(user, masterfolderId, startParam) {
     const d = String(x?.category || '').trim();
     const folder = String(x?.folder_path || '').trim();
     if (d && folder) {
-      clauses.push(`(f.category = $${paramCount++} AND (f.folder = $${paramCount++} OR f.folder LIKE $${paramCount++}))`);
+      folderClauses.push(`(f.category = $${paramCount++} AND (f.folder = $${paramCount++} OR f.folder LIKE $${paramCount++}))`);
       values.push(d);
       values.push(folder);
       values.push(folder + '/%');
     }
   }
   
-  if (clauses.length === 0) {
-    return { sql: '1=0', values, paramCount };
+  let finalSql = '';
+  if (folderClauses.length > 0) {
+    finalSql = `(${mainCategorySql} OR ${folderClauses.join(' OR ')})`;
+  } else {
+    finalSql = `(${mainCategorySql})`;
   }
-  return { sql: `(${clauses.join(' OR ')})`, values, paramCount };
+  
+  return { sql: finalSql, values, paramCount };
 }
 
 // --- RBAC HELPERS in src/services/accessService ---
