@@ -1414,6 +1414,7 @@ app.get('/api/stats/category/:dept', verifyToken, async (req, res) => {
   const { dept } = req.params;
   const { masterfolderId, fyId } = req.query;
   try {
+    await hydrateRequestUser(req);
     const normalizedCompanyId = masterfolderId ? Number(masterfolderId) : null;
     const normalizedFyId = fyId ? Number(fyId) : null;
     if (!normalizedCompanyId) {

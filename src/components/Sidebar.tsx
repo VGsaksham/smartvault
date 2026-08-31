@@ -95,24 +95,8 @@ export default function Sidebar() {
       if (!masterfolderId ) return;
       if (Number(detailmasterfolder) !== Number(masterfolderId)) return;
 
-      const storedUser = localStorage.getItem('user');
-      const user = storedUser ? JSON.parse(storedUser) : null;
-      const isSystemAdmin = user?.role === 'Admin';
-
-      if (!isSystemAdmin) {
-        const accessRows = user?.masterfolder_access || [];
-        const folderRows = user?.folder_access || [];
-
-        const userCategories = [
-          ...accessRows.filter((x: any) => Number(x.masterfolder_id) === Number(masterfolderId)).map((x: any) => x.category),
-          ...folderRows.filter((x: any) => Number(x.masterfolder_id) === Number(masterfolderId) && !x.is_exclusion).map((x: any) => x.category)
-        ];
-        setStructureDepts(Array.from(new Set(userCategories)).filter(Boolean));
-        return;
-      }
-
-      const params = new URLSearchParams({ masterfolderId });
-      fetch(apiUrl(`/api/admin/structure?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } })
+      const params = new URLSearchParams({ masterfolderId, fyId: '1' });
+      fetch(apiUrl(`/api/structure?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } })
         .then(async (res) => {
           const data = await res.json().catch(() => ({}));
           if (!res.ok) return [];
@@ -120,7 +104,7 @@ export default function Sidebar() {
           return categories.map((d: any) => String(d?.name || '')).filter(Boolean);
         })
         .then((names: string[]) => setStructureDepts(names))
-        .catch(() => {});
+        .catch(() => setStructureDepts([]));
     };
     window.addEventListener('smartvault:structureChanged', handler as any);
     return () => window.removeEventListener('smartvault:structureChanged', handler as any);
