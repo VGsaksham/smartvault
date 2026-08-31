@@ -29,6 +29,7 @@ type masterfolderAccess = {
   category: string;
   can_upload: boolean;
   is_primary?: boolean;
+  is_exclusion?: boolean;
 };
 
 // Admin role is reserved (not assignable via UI)
@@ -142,8 +143,7 @@ function UsersPageContent() {
   const dummyNull = searchParams.get('null');
 
   const getDefaultCategory = () => {
-    const primarymasterfolderAccess = (detailPermData?.masterfolder_access || []).find((x: masterfolderAccess) => Boolean(x?.is_primary));
-    return String(primarymasterfolderAccess?.category || selectedUser?.category || categories[0] || '').trim();
+    return 'ALL';
   };
 
   const fetchmasterfolderCategories = useCallback(async (targetMasterfolderId: number) => {
@@ -154,8 +154,8 @@ function UsersPageContent() {
       });
       const data = await res.json().catch(() => ({}));
       const names = Array.isArray(data?.categories)
-        ? data.categories.map((d: any) => String(d?.name || '').trim()).filter(Boolean)
-        : [];
+        ? ['ALL', ...data.categories.map((d: any) => String(d?.name || '').trim()).filter(Boolean)]
+        : ['ALL'];
       setmasterfolderDeptOptions((prev) => ({ ...prev, [targetMasterfolderId]: names }));
       return names;
     } catch {
@@ -557,11 +557,18 @@ function UsersPageContent() {
   const setmasterfolderCategoryMode = (masterfolderId: number, category: string, canUpload: boolean) => {
     setDetailPermData((p: any) => {
       const current: masterfolderAccess[] = Array.isArray(p?.masterfolder_access) ? [...p.masterfolder_access] : [];
-      const masterfolderRows = current.filter((x) => Number(x.masterfolder_id) === masterfolderId);
-      const masterfolderReadOnly = masterfolderRows.length > 0 && !masterfolderRows.some((x) => Boolean(x.can_upload));
-      if (masterfolderReadOnly && canUpload) return p;
       const next = current.map((x) => (
         Number(x.masterfolder_id) === masterfolderId && x.category === category ? { ...x, can_upload: canUpload } : x
+      ));
+      return { ...p, masterfolder_access: next };
+    });
+  };
+
+  const togglemasterfolderCategoryExclusion = (masterfolderId: number, category: string, isExclusion: boolean) => {
+    setDetailPermData((p: any) => {
+      const current: masterfolderAccess[] = Array.isArray(p?.masterfolder_access) ? [...p.masterfolder_access] : [];
+      const next = current.map((x) => (
+        Number(x.masterfolder_id) === masterfolderId && x.category === category ? { ...x, is_exclusion: isExclusion } : x
       ));
       return { ...p, masterfolder_access: next };
     });
@@ -927,6 +934,16 @@ function UsersPageContent() {
                                   Write
                                 </button>
                               </div>
+                            </div>
+                          )}
+                          {enabled && category !== 'ALL' && (
+                            <div className="mt-2 flex items-center justify-between border-t border-[var(--border-subtle)] pt-2">
+                              <span className="text-[12px] text-[var(--text-secondary)]">Exclude from ALL</span>
+                              <input
+                                type="checkbox"
+                                checked={Boolean(row?.is_exclusion)}
+                                onChange={(e) => togglemasterfolderCategoryExclusion(masterfolderDeptPrompt.masterfolderId, category, e.target.checked)}
+                              />
                             </div>
                           )}
                         </div>

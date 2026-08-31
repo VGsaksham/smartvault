@@ -8,6 +8,7 @@ async function ensureUsermasterfolderAccessSchema(db = pool) {
       category TEXT NOT NULL,
       can_upload BOOLEAN NOT NULL DEFAULT false,
       is_primary BOOLEAN NOT NULL DEFAULT false,
+      is_exclusion BOOLEAN NOT NULL DEFAULT false,
       created_at TIMESTAMP NOT NULL DEFAULT NOW(),
       updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
       PRIMARY KEY (user_id, masterfolder_id, category)
@@ -32,6 +33,7 @@ async function ensureUsermasterfolderAccessSchema(db = pool) {
   await db.query(`ALTER TABLE user_masterfolder_access ADD COLUMN IF NOT EXISTS category TEXT;`).catch(() => {});
   await db.query(`ALTER TABLE user_masterfolder_access ADD COLUMN IF NOT EXISTS can_upload BOOLEAN NOT NULL DEFAULT false;`).catch(() => {});
   await db.query(`ALTER TABLE user_masterfolder_access ADD COLUMN IF NOT EXISTS is_primary BOOLEAN NOT NULL DEFAULT false;`).catch(() => {});
+  await db.query(`ALTER TABLE user_masterfolder_access ADD COLUMN IF NOT EXISTS is_exclusion BOOLEAN NOT NULL DEFAULT false;`).catch(() => {});
   await db.query(`ALTER TABLE user_masterfolder_access ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT NOW();`).catch(() => {});
   await db.query(`ALTER TABLE user_masterfolder_access ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();`).catch(() => {});
 
@@ -123,6 +125,7 @@ function normalizemasterfolderAccess(rawAccess = [], fallbackCategory = '') {
       category,
       can_upload: Boolean(item?.can_upload),
       is_primary: Boolean(item?.is_primary),
+      is_exclusion: Boolean(item?.is_exclusion),
     });
   }
 
@@ -144,9 +147,9 @@ async function replaceUsermasterfolderAccess(db, userId, accessList, fallbackCat
   await db.query('DELETE FROM user_masterfolder_access WHERE user_id = $1', [userId]);
   for (const row of normalized) {
     await db.query(
-      `INSERT INTO user_masterfolder_access (user_id, masterfolder_id, category, can_upload, is_primary)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [userId, row.masterfolder_id, row.category, row.can_upload, row.is_primary]
+      `INSERT INTO user_masterfolder_access (user_id, masterfolder_id, category, can_upload, is_primary, is_exclusion)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [userId, row.masterfolder_id, row.category, row.can_upload, row.is_primary, row.is_exclusion]
     );
   }
   return normalized;
@@ -154,7 +157,7 @@ async function replaceUsermasterfolderAccess(db, userId, accessList, fallbackCat
 
 async function getUsermasterfolderAccess(db, userId) {
   const result = await db.query(
-    `SELECT uca.masterfolder_id, c.name AS masterfolder_name, uca.category, uca.can_upload, uca.is_primary
+    `SELECT uca.masterfolder_id, c.name AS masterfolder_name, uca.category, uca.can_upload, uca.is_primary, uca.is_exclusion
      FROM user_masterfolder_access uca
      JOIN masterfolders c ON c.id = uca.masterfolder_id
      WHERE uca.user_id = $1

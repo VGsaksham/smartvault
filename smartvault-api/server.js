@@ -230,21 +230,46 @@ function getAllowedDepartmentsForMasterfolder(user, masterfolderId = null) {
   const scoped = Number.isFinite(Number(masterfolderId))
     ? rows.filter((x) => Number(x.masterfolder_id) === Number(masterfolderId))
     : rows;
-  const depts = Array.from(
-    new Set(
-      scoped
-        .map((x) => String(x?.category || '').trim())
-        .filter(Boolean)
-    )
-  );
-  if (depts.length > 0) return depts;
-  const fallback = Array.from(
-    new Set(
-      [String(user?.category || '').trim(), ...((Array.isArray(user?.allowed_categories) ? user.allowed_categories : []).map((d) => String(d || '').trim()))]
-        .filter(Boolean)
-    )
-  );
-  return fallback;
+
+  const hasAll = scoped.some((x) => String(x.category).trim() === 'ALL' && !x.is_exclusion);
+  const exclusions = Array.from(new Set(scoped.filter((x) => x.is_exclusion).map((x) => String(x.category).trim())));
+  const allowed = Array.from(new Set(scoped.filter((x) => !x.is_exclusion && String(x.category).trim() !== 'ALL').map((x) => String(x.category).trim())));
+
+  if (allowed.length === 0 && !hasAll && exclusions.length === 0) {
+    const fallback = Array.from(
+      new Set(
+        [String(user?.category || '').trim(), ...((Array.isArray(user?.allowed_categories) ? user.allowed_categories : []).map((d) => String(d || '').trim()))]
+          .filter(Boolean)
+      )
+    );
+    return { hasAll: false, allowed: fallback, exclusions: [] };
+  }
+
+  return { hasAll, allowed, exclusions };
+}
+
+function canAccessDept(deptScope, category) {
+  if (!deptScope) return false;
+  const cat = String(category).trim();
+  if (deptScope.exclusions.includes(cat)) return false;
+  if (deptScope.hasAll) return true;
+  return deptScope.allowed.includes(cat);
+}
+
+function applyDeptScopeToQuery(deptScope, query, values, tableAlias = 'f') {
+  let p = values.length + 1;
+  if (deptScope.hasAll) {
+    if (deptScope.exclusions.length > 0) {
+      query += ` AND NOT ${tableAlias}.category = ANY($${p++})`;
+      values.push(deptScope.exclusions);
+    }
+  } else if (deptScope.allowed.length > 0) {
+    query += ` AND ${tableAlias}.category = ANY($${p++})`;
+    values.push(deptScope.allowed);
+  } else {
+    query += ` AND 1=0`;
+  }
+  return { query, values, p };
 }
 // ------------------------
 
@@ -585,7 +610,7 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
       }
     }
     const deptScope = getAllowedDepartmentsForMasterfolder(req.user, Number(masterfolderId));
-    if (!deptScope.includes(String(category))) {
+    if (!canAccessDept(deptScope, category)) {
       return res.status(403).json({ error: "You do not have access to this category in the selected company." });
     }
   }
@@ -1272,11 +1297,13 @@ app.get('/api/search/options', verifyToken, async (req, res) => {
       ? managedDepartments
       : (result.rows[0]?.categories || []);
 
-    // Apply user access filtering even when using managed categories.
     const categories =
       req.user.role === 'Admin'
         ? rawDepartments
-        : rawDepartments.filter((d) => getAllowedDepartmentsForMasterfolder(req.user, normalizedCompanyId).includes(d));
+        : (() => {
+            const scope = getAllowedDepartmentsForMasterfolder(req.user, normalizedCompanyId);
+            return rawDepartments.filter((d) => canAccessDept(scope, d));
+          })();
 
     res.json({
       categories,
@@ -1324,15 +1351,18 @@ app.get('/api/structure', verifyToken, async (req, res) => {
       if (allowedMasterfolderIds.length > 0 && !allowedMasterfolderIds.includes(masterfolderId)) {
         return res.status(403).json({ error: 'You do not have access to this company.' });
       }
-      const allowed = new Set(getAllowedDepartmentsForMasterfolder(req.user, masterfolderId));
-      const folderAccess = Array.isArray(req.user.folder_access) ? req.user.folder_access : [];
-      for (const fAccess of folderAccess) {
-        if (!fAccess.is_exclusion && Number(fAccess.masterfolder_id) === Number(masterfolderId)) {
-          const deptName = String(fAccess.category || '').trim();
-          if (deptName) allowed.add(deptName);
+      const allowed = getAllowedDepartmentsForMasterfolder(req.user, masterfolderId);
+      categories = categories.filter((d) => {
+        if (canAccessDept(allowed, d.name)) return true;
+        const folderAccess = Array.isArray(req.user.folder_access) ? req.user.folder_access : [];
+        for (const fAccess of folderAccess) {
+          if (!fAccess.is_exclusion && Number(fAccess.masterfolder_id) === Number(masterfolderId)) {
+            const deptName = String(fAccess.category || '').trim();
+            if (deptName === d.name) return true;
+          }
         }
-      }
-      categories = categories.filter((d) => allowed.has(d.name));
+        return false;
+      });
     }
 
     const deptIds = categories.map((d) => d.id);
@@ -1949,7 +1979,7 @@ app.post('/api/files/bulk', verifyToken, async (req, res) => {
 
     for (const fileId of fileIds) {
       const result = await client.query(`
-        SELECT f.*, fy.status as fy_status 
+        SELECT f.*, fy.status as fy_status, m.masterfolder_id 
         FROM vault_files f
         LEFT JOIN vault_file_metadata m ON m.file_id = f.id
         LEFT JOIN financial_years fy ON fy.id = m.fy_id

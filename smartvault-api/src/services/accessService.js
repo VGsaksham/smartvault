@@ -7,7 +7,26 @@ function checkFilePermission(user, fileRecord, action) {
   // 'DELETE' and 'DELETE_COPIES' strictly blocked (unless Admin, which is handled above)
   if (action === 'DELETE' || action === 'DELETE_COPIES') return false; 
 
-  const isOwnDeptOrAllowed = (fileRecord.category === user.category) || (user.allowed_categories && user.allowed_categories.includes(fileRecord.category));
+  const scoped = Number.isFinite(Number(fileRecord.masterfolder_id))
+    ? (Array.isArray(user?.masterfolder_access) ? user.masterfolder_access : []).filter((x) => Number(x.masterfolder_id) === Number(fileRecord.masterfolder_id))
+    : (Array.isArray(user?.masterfolder_access) ? user.masterfolder_access : []);
+    
+  const hasAll = scoped.some((x) => String(x.category).trim() === 'ALL' && !x.is_exclusion);
+  const exclusions = Array.from(new Set(scoped.filter((x) => x.is_exclusion).map((x) => String(x.category).trim())));
+  const allowed = Array.from(new Set(scoped.filter((x) => !x.is_exclusion && String(x.category).trim() !== 'ALL').map((x) => String(x.category).trim())));
+
+  let isOwnDeptOrAllowed = false;
+  if (allowed.length === 0 && !hasAll && exclusions.length === 0) {
+    const fallback = Array.from(
+      new Set(
+        [String(user?.category || '').trim(), ...((Array.isArray(user?.allowed_categories) ? user.allowed_categories : []).map((d) => String(d || '').trim()))]
+          .filter(Boolean)
+      )
+    );
+    isOwnDeptOrAllowed = fallback.includes(String(fileRecord.category).trim());
+  } else {
+    isOwnDeptOrAllowed = hasAll ? !exclusions.includes(String(fileRecord.category).trim()) : allowed.includes(String(fileRecord.category).trim());
+  }
   
   if (user.role === 'Manager') {
     // Edit (Rename/Tag/Expiry/Copy) & Move: Yes - own category (or allowed)
