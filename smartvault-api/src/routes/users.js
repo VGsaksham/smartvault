@@ -75,7 +75,8 @@ router.get('/', verifyToken, async (req, res) => {
             'masterfolder_name', m.name,
             'category', uca.category,
             'can_upload', uca.can_upload,
-            'is_primary', uca.is_primary
+            'is_primary', uca.is_primary,
+            'is_exclusion', uca.is_exclusion
           )
           ORDER BY uca.is_primary DESC, m.name, uca.category
         ) AS masterfolder_access

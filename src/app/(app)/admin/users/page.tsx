@@ -525,18 +525,26 @@ function UsersPageContent() {
 
       if (!checked) {
         if (idx === -1) return p;
-        const next = current.filter((_, i) => i !== idx);
-        const masterfolderRowsAfter = next.filter((x) => Number(x.masterfolder_id) === masterfolderId);
+        let next = current.filter((_, i) => i !== idx);
+        
+        if (category === 'ALL') {
+          next = next.filter((x) => !(Number(x.masterfolder_id) === masterfolderId && x.is_exclusion));
+        }
+
+        const masterfolderRowsAfter = next.filter((x) => Number(x.masterfolder_id) === masterfolderId && !x.is_exclusion);
         if (masterfolderRowsAfter.length === 0) {
            next.push({
              masterfolder_id: masterfolderId,
              masterfolder_name: masterfolderName,
              category: '',
              can_upload: false,
-             is_primary: next.length === 0
+             is_primary: next.filter(x => !x.is_exclusion).length === 0
            });
         }
-        if (next.length > 0 && !next.some((x) => x.is_primary)) next[0].is_primary = true;
+        if (next.length > 0 && !next.some((x) => x.is_primary)) {
+          const firstNonEx = next.find(x => !x.is_exclusion);
+          if (firstNonEx) firstNonEx.is_primary = true;
+        }
         return { ...p, masterfolder_access: next };
       }
 
@@ -567,9 +575,26 @@ function UsersPageContent() {
   const togglemasterfolderCategoryExclusion = (masterfolderId: number, category: string, isExclusion: boolean) => {
     setDetailPermData((p: any) => {
       const current: masterfolderAccess[] = Array.isArray(p?.masterfolder_access) ? [...p.masterfolder_access] : [];
-      const next = current.map((x) => (
-        Number(x.masterfolder_id) === masterfolderId && x.category === category ? { ...x, is_exclusion: isExclusion } : x
-      ));
+      const exists = current.some((x) => Number(x.masterfolder_id) === masterfolderId && x.category === category);
+      let next;
+      if (exists) {
+        if (!isExclusion) {
+          next = current.filter((x) => !(Number(x.masterfolder_id) === masterfolderId && x.category === category && x.is_exclusion && !x.can_upload));
+          next = next.map((x) => (
+            Number(x.masterfolder_id) === masterfolderId && x.category === category ? { ...x, is_exclusion: false } : x
+          ));
+        } else {
+          next = current.map((x) => (
+            Number(x.masterfolder_id) === masterfolderId && x.category === category ? { ...x, is_exclusion: true } : x
+          ));
+        }
+      } else {
+        if (isExclusion) {
+          next = [...current, { masterfolder_id: masterfolderId, category, can_upload: false, is_primary: false, is_exclusion: true }];
+        } else {
+          next = current;
+        }
+      }
       return { ...p, masterfolder_access: next };
     });
   };
@@ -895,21 +920,25 @@ function UsersPageContent() {
                   <div className="max-h-[52vh] overflow-y-auto pr-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {(masterfolderDeptOptions[masterfolderDeptPrompt.masterfolderId] || []).map((category) => {
                       const masterfolderRows: masterfolderAccess[] = (detailPermData?.masterfolder_access || []).filter((x: masterfolderAccess) => Number(x.masterfolder_id) === masterfolderDeptPrompt.masterfolderId);
+                      const hasAll = masterfolderRows.some((x: masterfolderAccess) => x.category === 'ALL' && !x.is_exclusion);
                       const masterfolderReadOnly = masterfolderRows.length > 0 && !masterfolderRows.some((x: masterfolderAccess) => Boolean(x.can_upload));
                       const row = masterfolderRows.find((x: masterfolderAccess) => x.category === category);
                       const enabled = Boolean(row);
+                      const isExcluded = Boolean(row?.is_exclusion);
                       const deptCanUpload = Boolean(row?.can_upload);
                       return (
                         <div key={category} className="border border-[var(--border-subtle)] rounded-[12px] p-3 bg-[var(--bg-elevated)]/25">
                           <div className="flex items-center justify-between">
                             <span className="text-[14px] font-semibold text-[var(--text-primary)]">{category}</span>
-                            <input
-                              type="checkbox"
-                              checked={enabled}
-                              onChange={(e) => togglemasterfolderCategory(masterfolderDeptPrompt.masterfolderId, category, e.target.checked)}
-                            />
+                            {(!hasAll || category === 'ALL') && (
+                              <input
+                                type="checkbox"
+                                checked={enabled && !isExcluded}
+                                onChange={(e) => togglemasterfolderCategory(masterfolderDeptPrompt.masterfolderId, category, e.target.checked)}
+                              />
+                            )}
                           </div>
-                          {enabled && (
+                          {(!hasAll || category === 'ALL') && enabled && !isExcluded && (
                             <div className="mt-2 flex items-center justify-between">
                               <span className="text-[12px] text-[var(--text-secondary)]">{deptCanUpload ? 'Write' : 'Read'}</span>
                               <div className="flex items-center gap-1.5">
@@ -936,12 +965,12 @@ function UsersPageContent() {
                               </div>
                             </div>
                           )}
-                          {enabled && category !== 'ALL' && (
+                          {hasAll && category !== 'ALL' && (
                             <div className="mt-2 flex items-center justify-between border-t border-[var(--border-subtle)] pt-2">
                               <span className="text-[12px] text-[var(--text-secondary)]">Exclude from ALL</span>
                               <input
                                 type="checkbox"
-                                checked={Boolean(row?.is_exclusion)}
+                                checked={isExcluded}
                                 onChange={(e) => togglemasterfolderCategoryExclusion(masterfolderDeptPrompt.masterfolderId, category, e.target.checked)}
                               />
                             </div>
