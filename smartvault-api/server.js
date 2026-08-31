@@ -2576,6 +2576,13 @@ app.listen(PORT, HOST, async () => {
   await ensureBackupDir();
   await ensureMinioBucket();
   await bootstrapAdminIfConfigured();
+  
+  try {
+    const { ensureUsermasterfolderAccessSchema } = require('./src/services/usermasterfolderAccessService');
+    await ensureUsermasterfolderAccessSchema(pool);
+  } catch (e) {
+    console.error('[Startup] Failed to ensure user_masterfolder_access schema:', e.message);
+  }
 
   // Run FY sync immediately on server boot (only if enabled)
   if (FY_AUTO_SYNC_ENABLED) await syncFinancialYears();
