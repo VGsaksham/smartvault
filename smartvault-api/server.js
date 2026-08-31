@@ -1412,17 +1412,20 @@ app.get('/api/auth/heartbeat', verifyToken, async (req, res) => {
 app.get('/api/stats/category/:dept', verifyToken, async (req, res) => {
   const { dept } = req.params;
   const { masterfolderId, fyId } = req.query;
-
-  if (req.user.role !== 'Admin' && req.user.category !== dept) {
-    return res.status(403).json({ error: "Access denied to this category's stats." });
-  }
-
   try {
     const normalizedCompanyId = masterfolderId ? Number(masterfolderId) : null;
     const normalizedFyId = fyId ? Number(fyId) : null;
     if (!normalizedCompanyId) {
       return res.status(400).json({ error: "masterfolderId is required." });
     }
+
+    if (req.user.role !== 'Admin') {
+      const deptScope = getAllowedDepartmentsForMasterfolder(req.user, normalizedCompanyId);
+      if (!canAccessDept(deptScope, dept)) {
+        return res.status(403).json({ error: "Access denied to this category's stats." });
+      }
+    }
+
     if (normalizedFyId) {
       const fyMatch = await pool.query(
         'SELECT id FROM financial_years WHERE id = $1 AND masterfolder_id = $2 LIMIT 1',

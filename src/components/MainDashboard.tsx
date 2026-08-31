@@ -1519,7 +1519,7 @@ const renderSearchPath = (file: any) => {
           <h3 className="text-[20px] font-semibold tracking-[-0.374px] text-[var(--text-primary)] mb-6">Category Archives</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
             {categoryStats
-              .filter(category => userRole === 'Admin' || category.name === userCategory || userAllowedDepts.includes(category.name))
+              .filter(category => userRole === 'Admin' || category.name === userCategory || structureCategories.some(c => c.name === category.name))
               .map((category) => (
               <button 
                 key={category.name}
@@ -1828,7 +1828,7 @@ const renderSearchPath = (file: any) => {
         <div className="text-[17px] font-normal tracking-[-0.374px] text-[#e30000]">
           Error loading files from database: {(files as any)?.error || "Unknown error"}
         </div>
-      ) : userRole !== 'Admin' && activeCategory !== 'All files' && activeCategory !== userCategory && !userAllowedDepts.includes(activeCategory) ? (
+      ) : userRole !== 'Admin' && activeCategory !== 'All files' && activeCategory !== userCategory && !structureCategories.some(c => c.name === activeCategory) ? (
         <div className="flex flex-col items-center justify-center p-12 text-center bg-[var(--bg-surface)] rounded-[18px] border border-[var(--border-subtle)]">
           <div className="w-12 h-12 rounded-full bg-[var(--bg-neutral)] flex items-center justify-center mb-4">
             <Shield className="text-[#ff3b30]" size={24} />
