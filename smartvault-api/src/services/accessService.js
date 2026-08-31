@@ -99,7 +99,7 @@ async function getEffectiveUserSettings(userId, db = pool) {
   }
 
   const masterfolderAccessResult = await db.query(
-    `SELECT masterfolder_id, category, can_upload, is_primary
+    `SELECT masterfolder_id, category, can_upload, is_primary, is_exclusion
      FROM user_masterfolder_access
      WHERE user_id = $1
      ORDER BY is_primary DESC, masterfolder_id ASC, category ASC`,
