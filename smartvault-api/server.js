@@ -1325,16 +1325,16 @@ app.get('/api/structure', verifyToken, async (req, res) => {
     await hydrateRequestUser(req);
     const masterfolderId = req.query.masterfolderId ? Number(req.query.masterfolderId) : null;
     const fyId = req.query.fyId ? Number(req.query.fyId) : null;
-    if (!Number.isFinite(masterfolderId) || !Number.isFinite(fyId)) {
-      return res.status(400).json({ error: 'masterfolderId and fyId are required.' });
+    if (!Number.isFinite(masterfolderId)) {
+      return res.status(400).json({ error: 'masterfolderId is required.' });
     }
 
     const deptRows = await pool.query(
       `SELECT id, name
        FROM masterfolder_categories
-       WHERE masterfolder_id = $1 AND fy_id = $2
+       WHERE masterfolder_id = $1
        ORDER BY LOWER(name) ASC`,
-      [masterfolderId, fyId]
+      [masterfolderId]
     ).catch(() => ({ rows: [] }));
 
     let categories = deptRows.rows.map((d) => ({ id: d.id, name: d.name }));

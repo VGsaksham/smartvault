@@ -868,7 +868,7 @@ function UsersPageContent() {
             </div>
 
             {accessPrompt && !masterfolderDeptPrompt && (
-              <div className="absolute inset-0 bg-black/35 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/35 flex items-center justify-center p-4 z-50">
                 <div className="w-full max-w-[320px] rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-[var(--shadow-medium)] p-4">
                   <p className="text-[15px] font-semibold text-[var(--text-primary)]">{accessPrompt.label}</p>
                   <p className="text-[12px] text-[var(--text-secondary)] mt-1">Choose permission mode</p>
@@ -906,7 +906,7 @@ function UsersPageContent() {
             )}
 
             {masterfolderDeptPrompt && (
-              <div className="absolute inset-0 bg-black/35 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-black/35 flex items-center justify-center p-4 z-50">
                 <div className="w-full max-w-[560px] rounded-[16px] border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-[var(--shadow-medium)] p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div>

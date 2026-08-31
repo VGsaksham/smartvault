@@ -431,8 +431,8 @@ const toggleDarkMode = () => {
   useEffect(() => {
     const token = localStorage.getItem('token');
     if (!token || !masterfolderId) return;
-    const params = new URLSearchParams({ masterfolderId });
-    fetch(apiUrl(`/api/admin/structure?${params.toString()}`), {
+    const params = new URLSearchParams({ masterfolderId, fyId: '1' });
+    fetch(apiUrl(`/api/structure?${params.toString()}`), {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(async (res) => {
@@ -451,8 +451,8 @@ const toggleDarkMode = () => {
       const detailCompany = ev?.detail?.masterfolderId;
       const detailFy = ev?.detail?.dummyNull;
       if (Number(detailCompany) !== Number(masterfolderId) ) return;
-      const params = new URLSearchParams({ masterfolderId });
-      fetch(apiUrl(`/api/admin/structure?${params.toString()}`), {
+      const params = new URLSearchParams({ masterfolderId, fyId: '1' });
+      fetch(apiUrl(`/api/structure?${params.toString()}`), {
         headers: { Authorization: `Bearer ${token}` }
       })
         .then(async (res) => {

@@ -73,20 +73,8 @@ export default function Sidebar() {
     const user = storedUser ? JSON.parse(storedUser) : null;
     const isSystemAdmin = user?.role === 'Admin';
 
-    if (!isSystemAdmin) {
-      const accessRows = user?.masterfolder_access || [];
-      const folderRows = user?.folder_access || [];
-
-      const userCategories = [
-        ...accessRows.filter((x: any) => Number(x.masterfolder_id) === Number(masterfolderId)).map((x: any) => x.category),
-        ...folderRows.filter((x: any) => Number(x.masterfolder_id) === Number(masterfolderId) && !x.is_exclusion).map((x: any) => x.category)
-      ];
-      setStructureDepts(Array.from(new Set(userCategories)).filter(Boolean));
-      return;
-    }
-
-    const params = new URLSearchParams({ masterfolderId });
-    fetch(apiUrl(`/api/admin/structure?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } })
+    const params = new URLSearchParams({ masterfolderId, fyId: '1' });
+    fetch(apiUrl(`/api/structure?${params.toString()}`), { headers: { Authorization: `Bearer ${token}` } })
       .then(async (res) => {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) return [];
