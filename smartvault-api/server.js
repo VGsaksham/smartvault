@@ -599,20 +599,31 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
     return res.status(403).json({ error: "Guests cannot upload files." });
   }
   if (req.user.role !== 'Admin') {
-    const masterfolderRows = Array.isArray(req.user.masterfolder_access) ? req.user.masterfolder_access : [];
-    const forCompany = masterfolderRows.filter((x) => Number(x.masterfolder_id) === Number(masterfolderId));
-    if (forCompany.length > 0) {
-      const deptRow = forCompany.find((x) => String(x.category) === String(category));
-      if (!deptRow) {
-        return res.status(403).json({ error: "You do not have category access in this company." });
-      }
-      if (!Boolean(deptRow.can_upload)) {
-        return res.status(403).json({ error: "You only have read-only access in this company category." });
-      }
-    }
     const deptScope = getAllowedDepartmentsForMasterfolder(req.user, Number(masterfolderId));
     if (!canAccessDept(deptScope, category)) {
       return res.status(403).json({ error: "You do not have access to this category in the selected company." });
+    }
+
+    const masterfolderRows = Array.isArray(req.user.masterfolder_access) ? req.user.masterfolder_access : [];
+    const forCompany = masterfolderRows.filter((x) => Number(x.masterfolder_id) === Number(masterfolderId) && !x.is_exclusion);
+    
+    let canUpload = false;
+    if (forCompany.length > 0) {
+      const exactRow = forCompany.find((x) => String(x.category) === String(category));
+      if (exactRow) {
+        canUpload = Boolean(exactRow.can_upload);
+      } else {
+        const allRow = forCompany.find((x) => String(x.category) === 'ALL');
+        if (allRow) {
+          canUpload = Boolean(allRow.can_upload);
+        }
+      }
+    } else {
+      canUpload = req.user.role === 'Manager' || req.user.can_upload_to_allowed || req.user.category === category;
+    }
+
+    if (!canUpload) {
+      return res.status(403).json({ error: "You only have read-only access in this company category." });
     }
   }
 
@@ -1565,7 +1576,7 @@ app.get(['/api/preview/:id', '/api/preview/:id/:filename'], verifyToken, async (
   try {
     await hydrateRequestUser(req);
     const fileResult = await pool.query(
-      'SELECT minio_filename, original_name, mime_type, category FROM vault_files WHERE id = $1 LIMIT 1',
+      'SELECT f.minio_filename, f.original_name, f.mime_type, f.category, m.masterfolder_id, f.folder FROM vault_files f LEFT JOIN vault_file_metadata m ON m.file_id = f.id WHERE f.id = $1 LIMIT 1',
       [req.params.id]
     );
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
@@ -1651,7 +1662,7 @@ app.get('/api/stream/:id', verifyToken, async (req, res) => {
   try {
     await hydrateRequestUser(req);
     const fileResult = await pool.query(
-      'SELECT minio_filename, original_name, mime_type, category FROM vault_files WHERE id = $1 LIMIT 1',
+      'SELECT f.minio_filename, f.original_name, f.mime_type, f.category, m.masterfolder_id, f.folder FROM vault_files f LEFT JOIN vault_file_metadata m ON m.file_id = f.id WHERE f.id = $1 LIMIT 1',
       [req.params.id]
     );
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
