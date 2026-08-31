@@ -930,15 +930,14 @@ function UsersPageContent() {
                         <div key={category} className="border border-[var(--border-subtle)] rounded-[12px] p-3 bg-[var(--bg-elevated)]/25">
                           <div className="flex items-center justify-between">
                             <span className="text-[14px] font-semibold text-[var(--text-primary)]">{category}</span>
-                            {(!hasAll || category === 'ALL') && (
-                              <input
-                                type="checkbox"
-                                checked={enabled && !isExcluded}
-                                onChange={(e) => togglemasterfolderCategory(masterfolderDeptPrompt.masterfolderId, category, e.target.checked)}
-                              />
-                            )}
+                            <input
+                              type="checkbox"
+                              checked={category === 'ALL' ? enabled : (hasAll ? false : (enabled && !isExcluded))}
+                              disabled={hasAll && category !== 'ALL'}
+                              onChange={(e) => togglemasterfolderCategory(masterfolderDeptPrompt.masterfolderId, category, e.target.checked)}
+                            />
                           </div>
-                          {(!hasAll || category === 'ALL') && enabled && !isExcluded && (
+                          {(category === 'ALL' ? enabled : (!hasAll && enabled && !isExcluded)) && (
                             <div className="mt-2 flex items-center justify-between">
                               <span className="text-[12px] text-[var(--text-secondary)]">{deptCanUpload ? 'Write' : 'Read'}</span>
                               <div className="flex items-center gap-1.5">
