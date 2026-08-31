@@ -56,11 +56,53 @@ function checkFilePermission(user, fileRecord, action) {
   return false;
 }
 
-function canAccessCategory(user, category) {
+function canAccessCategory(user, category, masterfolderId = null, folderPath = null) {
   if (!user || !category) return false;
   if (user.role === 'Admin') return true;
-  if (user.category === category) return true;
-  return Array.isArray(user.allowed_categories) && user.allowed_categories.includes(category);
+
+  const catStr = String(category).trim();
+
+  // 1. Check masterfolder_access
+  const mfa = Array.isArray(user.masterfolder_access) ? user.masterfolder_access : [];
+  const scoped = Number.isFinite(Number(masterfolderId))
+    ? mfa.filter(x => Number(x.masterfolder_id) === Number(masterfolderId))
+    : mfa;
+    
+  const hasAll = scoped.some(x => String(x.category).trim() === 'ALL' && !x.is_exclusion);
+  const exclusions = Array.from(new Set(scoped.filter(x => x.is_exclusion).map(x => String(x.category).trim())));
+  const allowed = Array.from(new Set(scoped.filter(x => !x.is_exclusion && String(x.category).trim() !== 'ALL').map(x => String(x.category).trim())));
+
+  let isAllowed = false;
+  if (allowed.length === 0 && !hasAll && exclusions.length === 0) {
+    const fallback = [
+      String(user.category || '').trim(),
+      ...(Array.isArray(user.allowed_categories) ? user.allowed_categories : []).map(d => String(d || '').trim())
+    ].filter(Boolean);
+    isAllowed = fallback.includes(catStr);
+  } else {
+    isAllowed = hasAll ? !exclusions.includes(catStr) : allowed.includes(catStr);
+  }
+
+  if (isAllowed) return true;
+
+  // 2. Check folder_access
+  if (Number.isFinite(Number(masterfolderId))) {
+    const folderRows = Array.isArray(user.folder_access) ? user.folder_access : [];
+    for (const fa of folderRows) {
+      if (fa.is_exclusion) continue;
+      if (Number(fa.masterfolder_id) === Number(masterfolderId) && String(fa.category).trim() === catStr) {
+        const faFolder = String(fa.folder_path || '').trim();
+        const checkFolder = String(folderPath || '').trim();
+        // Allow if they have access to the exact folder, or if the file is inside their allowed folder.
+        // Also allow if they are requesting to download a folder that is INSIDE their allowed folder.
+        if (checkFolder === faFolder || checkFolder.startsWith(faFolder + '/') || faFolder === '') {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 async function getEffectiveUserSettings(userId, db = pool) {

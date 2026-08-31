@@ -706,7 +706,7 @@ app.post('/api/upload', verifyToken, upload.single('document'), async (req, res)
 app.get('/api/public/files/:id', async (req, res) => {
   try {
     const result = await pool.query(`
-      SELECT f.*, c.name as masterfolder_name, fy.name as fy_name
+      SELECT f.*, m.masterfolder_id, c.name as masterfolder_name, fy.name as fy_name
       FROM vault_files f
       LEFT JOIN vault_file_metadata m ON f.id = m.file_id
       LEFT JOIN masterfolders c ON m.masterfolder_id = c.id
@@ -1189,7 +1189,7 @@ app.get('/api/files/:id', verifyToken, async (req, res) => {
     if (result.rows.length === 0) return res.status(404).json({ error: 'File not found' });
     const file = result.rows[0];
     
-    if (!canAccessCategory(req.user, file.category)) {
+    if (!canAccessCategory(req.user, file.category, file.masterfolder_id, file.folder)) {
       return res.status(403).json({ error: 'Access Denied.' });
     }
     
@@ -1571,7 +1571,7 @@ app.get(['/api/preview/:id', '/api/preview/:id/:filename'], verifyToken, async (
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
 
     const fileRecord = fileResult.rows[0];
-    if (!canAccessCategory(req.user, fileRecord.category)) {
+    if (!canAccessCategory(req.user, fileRecord.category, fileRecord.masterfolder_id, fileRecord.folder)) {
       return res.status(403).json({ error: 'Access Denied.' });
     }
 
@@ -1657,7 +1657,7 @@ app.get('/api/stream/:id', verifyToken, async (req, res) => {
     if (fileResult.rows.length === 0) return res.status(404).json({ error: 'File not found' });
 
     const fileRecord = fileResult.rows[0];
-    if (!canAccessCategory(req.user, fileRecord.category)) {
+    if (!canAccessCategory(req.user, fileRecord.category, fileRecord.masterfolder_id, fileRecord.folder)) {
       return res.status(403).json({ error: 'Access Denied.' });
     }
 
@@ -1807,11 +1807,11 @@ app.get(/^\/api\/download\/(.+)$/, verifyToken, async (req, res) => {
     const minioFilename = req.params[0];
     await hydrateRequestUser(req);
     // Check Database Privacy First
-    const fileResult = await pool.query('SELECT category, original_name, mime_type FROM vault_files WHERE minio_filename = $1 LIMIT 1', [minioFilename]);
+    const fileResult = await pool.query('SELECT f.category, f.original_name, f.mime_type, f.folder, m.masterfolder_id FROM vault_files f LEFT JOIN vault_file_metadata m ON m.file_id = f.id WHERE f.minio_filename = $1 LIMIT 1', [minioFilename]);
     if (fileResult.rows.length === 0) return res.status(404).json({ error: "File not found in database" });
 
     const fileRecord = fileResult.rows[0];
-    if (!canAccessCategory(req.user, fileRecord.category)) {
+    if (!canAccessCategory(req.user, fileRecord.category, fileRecord.masterfolder_id, fileRecord.folder)) {
       return res.status(403).json({ error: "Access Denied. You can only download files from your assigned category." });
     }
 
@@ -2240,7 +2240,7 @@ app.get('/api/folder/download', verifyToken, async (req, res) => {
       return res.status(403).json({ error: "You do not have permission for bulk download." });
     }
     
-    if (!canAccessCategory(req.user, category)) {
+    if (!canAccessCategory(req.user, category, masterfolderId, folder)) {
       return res.status(403).json({ error: "You do not have access to this category." });
     }
 
@@ -2330,10 +2330,10 @@ app.get('/api/files/bulk/download', verifyToken, async (req, res) => {
     if (req.user.role !== 'Admin' && req.user.can_bulk_download === false) {
       return res.status(403).json({ error: "You do not have permission for bulk download." });
     }
-    const result = await pool.query('SELECT * FROM vault_files WHERE id = ANY($1::int[])', [fileIds]);
+    const result = await pool.query('SELECT f.*, m.masterfolder_id FROM vault_files f LEFT JOIN vault_file_metadata m ON m.file_id = f.id WHERE f.id = ANY($1::int[])', [fileIds]);
     
     // Filter out files user can't download
-    const filesToDownload = result.rows.filter(fileRecord => canAccessCategory(req.user, fileRecord.category));
+    const filesToDownload = result.rows.filter(fileRecord => canAccessCategory(req.user, fileRecord.category, fileRecord.masterfolder_id, fileRecord.folder));
 
     if (filesToDownload.length === 0) {
       return res.status(403).json({ error: "No accessible files to download." });
