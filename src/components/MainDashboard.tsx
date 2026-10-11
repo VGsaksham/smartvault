@@ -12,6 +12,65 @@ import { CustomSelect } from '@/components/ui/Select';
 
 type SortField = 'name' | 'date' | 'size' | 'type';
 type SortDirection = 'asc' | 'desc';
+type FileTypeOption = 'group' | 'pdf' | 'image' | 'csv' | 'document' | 'media' | 'archive';
+
+function getFileCategory(file: any): 'pdf' | 'image' | 'csv' | 'document' | 'media' | 'archive' | 'other' {
+  if (!file) return 'other';
+  const mime = (file.mime_type || '').toLowerCase();
+  const name = (file.original_name || file.custom_name || file.user_alias || '').toLowerCase();
+  const ext = name.includes('.') ? name.split('.').pop() || '' : '';
+
+  // 1. PDF
+  if (mime.includes('pdf') || ext === 'pdf') {
+    return 'pdf';
+  }
+  // 2. Images (all image formats: jpg, png, webp, svg, gif, bmp, avif, tiff, ico, heic)
+  if (
+    mime.includes('image') || 
+    ['jpg', 'jpeg', 'png', 'webp', 'svg', 'gif', 'bmp', 'avif', 'tiff', 'ico', 'heic', 'heif'].includes(ext)
+  ) {
+    return 'image';
+  }
+  // 3. CSV & Spreadsheets (csv, xlsx, xls, tsv, ods, xlsm)
+  if (
+    mime.includes('csv') || 
+    mime.includes('sheet') || 
+    mime.includes('excel') || 
+    ['csv', 'xlsx', 'xls', 'tsv', 'ods', 'xlsm'].includes(ext)
+  ) {
+    return 'csv';
+  }
+  // 4. Documents (Word, Text, Presentation)
+  if (
+    mime.includes('word') || 
+    mime.includes('document') || 
+    mime.includes('text') || 
+    mime.includes('presentation') || 
+    ['doc', 'docx', 'txt', 'rtf', 'odt', 'ppt', 'pptx', 'pages'].includes(ext)
+  ) {
+    return 'document';
+  }
+  // 5. Media (Video & Audio)
+  if (
+    mime.includes('video') || 
+    mime.includes('audio') || 
+    ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mp3', 'wav', 'ogg', 'm4a', 'flac', 'aac'].includes(ext)
+  ) {
+    return 'media';
+  }
+  // 6. Archives (ZIP, RAR, etc.)
+  if (
+    mime.includes('zip') || 
+    mime.includes('compressed') || 
+    mime.includes('tar') || 
+    ['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)
+  ) {
+    return 'archive';
+  }
+
+  return 'other';
+}
+
 type StructureCategory = { name: string; folders: { id: number; name: string; parent_folder_id: number | null }[] };
 type UploadQueueItem = { id: string; file: File; targetFolder?: string; proposedName: string; proposedFolder?: string };
 
@@ -137,17 +196,27 @@ export default function MainDashboard() {
   // Sorting State
   const [sortField, setSortField] = useState<SortField>('date');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [typePriority, setTypePriority] = useState<FileTypeOption>('group');
+  const [typeFilterOnly, setTypeFilterOnly] = useState(false);
   const [isSortOpen, setIsSortOpen] = useState(false);
   const sortDropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const savedField = localStorage.getItem('smartvault-sort-field') as SortField | null;
     const savedDir = localStorage.getItem('smartvault-sort-direction') as SortDirection | null;
+    const savedType = localStorage.getItem('smartvault-type-priority') as FileTypeOption | null;
+    const savedTypeFilter = localStorage.getItem('smartvault-type-filter-only');
     if (savedField && ['name', 'date', 'size', 'type'].includes(savedField)) {
       setSortField(savedField);
     }
     if (savedDir && ['asc', 'desc'].includes(savedDir)) {
       setSortDirection(savedDir);
+    }
+    if (savedType && ['group', 'pdf', 'image', 'csv', 'document', 'media', 'archive'].includes(savedType)) {
+      setTypePriority(savedType);
+    }
+    if (savedTypeFilter === 'true') {
+      setTypeFilterOnly(true);
     }
   }, []);
 
@@ -188,8 +257,19 @@ export default function MainDashboard() {
         return sortDirection === 'desc' ? 'Date (Newest first)' : 'Date (Oldest first)';
       case 'size':
         return sortDirection === 'desc' ? 'Size (Largest first)' : 'Size (Smallest first)';
-      case 'type':
-        return sortDirection === 'asc' ? 'Format (A to Z)' : 'Format (Z to A)';
+      case 'type': {
+        const mode = typeFilterOnly ? 'Only' : 'Top';
+        switch (typePriority) {
+          case 'csv': return `CSV & Spreadsheets (${mode})`;
+          case 'image': return `Images (${mode})`;
+          case 'pdf': return `PDF Documents (${mode})`;
+          case 'document': return `Word & Docs (${mode})`;
+          case 'media': return `Videos & Audio (${mode})`;
+          case 'archive': return `Archives (${mode})`;
+          case 'group': return 'Group by Format';
+          default: return 'File Type';
+        }
+      }
       default:
         return 'Sort files';
     }
@@ -200,7 +280,19 @@ export default function MainDashboard() {
       case 'name': return 'Name';
       case 'date': return 'Date';
       case 'size': return 'Size';
-      case 'type': return 'Format';
+      case 'type': {
+        const prefix = typeFilterOnly ? 'Only: ' : '';
+        switch (typePriority) {
+          case 'csv': return `${prefix}CSV`;
+          case 'image': return `${prefix}Images`;
+          case 'pdf': return `${prefix}PDF`;
+          case 'document': return `${prefix}Docs`;
+          case 'media': return `${prefix}Media`;
+          case 'archive': return `${prefix}Zip`;
+          case 'group': return 'By Type';
+          default: return 'Type';
+        }
+      }
       default: return 'Sort';
     }
   };
@@ -294,6 +386,30 @@ const toggleDarkMode = () => {
   
   const [activeFolder, setActiveFolder] = useState<string | null>(folderParam );
 
+  // Compute live file counts by format in the current context
+  const typeCounts = useMemo(() => {
+    const counts = { pdf: 0, image: 0, csv: 0, document: 0, media: 0, archive: 0, other: 0 };
+    if (Array.isArray(files)) {
+      files.forEach(f => {
+        const matchesDept = activeCategory === 'All files' || f.category === activeCategory;
+        let matchesFolder = true;
+        const isValidFolder = (folderStr: string) => folderStr && folderStr !== 'null' && folderStr !== 'undefined' && folderStr !== '';
+        if (activeCategory !== 'All files') {
+          if (activeFolder) {
+            matchesFolder = f.folder === activeFolder;
+          } else {
+            matchesFolder = !isValidFolder(f.folder);
+          }
+        }
+        if (matchesDept && matchesFolder) {
+          const cat = getFileCategory(f);
+          if (counts[cat] !== undefined) counts[cat]++;
+        }
+      });
+    }
+    return counts;
+  }, [files, activeCategory, activeFolder]);
+
   const filteredFiles = useMemo(() => {
     if (!Array.isArray(files)) return [];
     const list = files.filter((file) => {
@@ -318,7 +434,14 @@ const toggleDarkMode = () => {
       return matchesSearch && matchesType && matchesDept && matchesFolder;
     });
 
-    return [...list].sort((a, b) => {
+    let processedList = [...list];
+
+    // If typeFilterOnly is active, filter list down to chosen category
+    if (sortField === 'type' && typeFilterOnly && typePriority !== 'group') {
+      processedList = processedList.filter(f => getFileCategory(f) === typePriority);
+    }
+
+    return processedList.sort((a, b) => {
       if (sortField === 'name') {
         const nameA = (a.user_alias || a.custom_name || a.original_name || '').toLowerCase();
         const nameB = (b.user_alias || b.custom_name || b.original_name || '').toLowerCase();
@@ -335,23 +458,43 @@ const toggleDarkMode = () => {
         return sortDirection === 'asc' ? sizeA - sizeB : sizeB - sizeA;
       }
       if (sortField === 'type') {
-        const getExt = (f: any) => {
-          const name = f.original_name || '';
-          const dot = name.lastIndexOf('.');
-          return dot > 0 ? name.slice(dot + 1).toLowerCase() : (f.mime_type || '').split('/').pop()?.toLowerCase() || '';
-        };
-        const extA = getExt(a);
-        const extB = getExt(b);
-        if (extA !== extB) {
-          return sortDirection === 'asc' ? extA.localeCompare(extB) : extB.localeCompare(extA);
+        const catA = getFileCategory(a);
+        const catB = getFileCategory(b);
+
+        if (typePriority === 'group') {
+          // Intelligently group files by format categories
+          const rankOrder: Record<string, number> = {
+            csv: 1,
+            image: 2,
+            pdf: 3,
+            document: 4,
+            media: 5,
+            archive: 6,
+            other: 7
+          };
+          const rankA = rankOrder[catA] || 99;
+          const rankB = rankOrder[catB] || 99;
+          if (rankA !== rankB) {
+            return sortDirection === 'desc' ? rankB - rankA : rankA - rankB;
+          }
+          const nameA = (a.user_alias || a.custom_name || a.original_name || '').toLowerCase();
+          const nameB = (b.user_alias || b.custom_name || b.original_name || '').toLowerCase();
+          return nameA.localeCompare(nameB);
+        } else {
+          // Prioritize the chosen file type to the top
+          const isA = catA === typePriority;
+          const isB = catB === typePriority;
+          if (isA && !isB) return -1;
+          if (!isA && isB) return 1;
+          // Secondary sort alphabetically
+          const nameA = (a.user_alias || a.custom_name || a.original_name || '').toLowerCase();
+          const nameB = (b.user_alias || b.custom_name || b.original_name || '').toLowerCase();
+          return nameA.localeCompare(nameB);
         }
-        const nameA = (a.user_alias || a.custom_name || a.original_name || '').toLowerCase();
-        const nameB = (b.user_alias || b.custom_name || b.original_name || '').toLowerCase();
-        return nameA.localeCompare(nameB);
       }
       return 0;
     });
-  }, [files, searchQuery, activeFilter, activeCategory, activeFolder, sortField, sortDirection]);
+  }, [files, searchQuery, activeFilter, activeCategory, activeFolder, sortField, sortDirection, typePriority, typeFilterOnly]);
 
   useEffect(() => {
     setActiveFolder(folderParam );
@@ -1812,33 +1955,30 @@ const renderSearchPath = (file: any) => {
                 </button>
 
                 {isSortOpen && (
-                  <div className="absolute right-0 top-full mt-2 w-64 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[16px] shadow-[0_12px_40px_rgba(0,0,0,0.18)] p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
-                    <div className="px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                  <div className="absolute right-0 top-full mt-2 w-72 sm:w-80 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[18px] shadow-[0_16px_48px_rgba(0,0,0,0.22)] p-2.5 z-50 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-2.5 py-1 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
                       Sort by
                     </div>
-                    <div className="flex flex-col gap-0.5">
+                    <div className="grid grid-cols-2 gap-1 mb-2">
                       {[
-                        { field: 'name' as SortField, label: 'Name', sub: 'File or alias name' },
-                        { field: 'date' as SortField, label: 'Date Added', sub: 'Upload timestamp' },
-                        { field: 'size' as SortField, label: 'File Size', sub: 'Smallest / Largest' },
-                        { field: 'type' as SortField, label: 'Format', sub: 'Extension / File type' },
+                        { field: 'name' as SortField, label: 'Name' },
+                        { field: 'date' as SortField, label: 'Date Added' },
+                        { field: 'size' as SortField, label: 'File Size' },
+                        { field: 'type' as SortField, label: 'File Type' },
                       ].map((item) => {
                         const isSelected = sortField === item.field;
                         return (
                           <button
                             key={item.field}
                             onClick={() => updateSort(item.field)}
-                            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-[10px] text-left transition-colors ${
+                            className={`flex items-center justify-between px-2.5 py-1.5 rounded-[9px] text-left transition-colors border ${
                               isSelected 
-                                ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-semibold' 
-                                : 'hover:bg-[var(--bg-neutral)] text-[var(--text-primary)] font-medium'
+                                ? 'bg-[var(--accent-soft)] border-[var(--accent)] text-[var(--accent)] font-semibold' 
+                                : 'border-[var(--border-subtle)] hover:bg-[var(--bg-neutral)] text-[var(--text-primary)] font-medium'
                             }`}
                           >
-                            <div className="flex flex-col">
-                              <span className="text-[13px] leading-tight">{item.label}</span>
-                              <span className="text-[11px] text-[var(--text-tertiary)] font-normal leading-tight mt-0.5">{item.sub}</span>
-                            </div>
-                            {isSelected && <Check size={16} className="text-[var(--accent)] shrink-0 ml-2" />}
+                            <span className="text-[12.5px] leading-tight">{item.label}</span>
+                            {isSelected && <Check size={14} className="text-[var(--accent)] shrink-0 ml-1" />}
                           </button>
                         );
                       })}
@@ -1846,33 +1986,116 @@ const renderSearchPath = (file: any) => {
 
                     <div className="my-1.5 border-t border-[var(--border-subtle)]"></div>
 
-                    <div className="px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
-                      Direction
-                    </div>
-                    <div className="grid grid-cols-2 gap-1">
-                      <button
-                        onClick={() => updateSort(sortField, 'asc')}
-                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-[8px] text-[12px] font-medium transition-colors border ${
-                          sortDirection === 'asc'
-                            ? 'bg-[var(--accent)] text-white border-[var(--accent)] font-semibold'
-                            : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
-                        }`}
-                      >
-                        <ArrowUp size={13} />
-                        {sortField === 'date' ? 'Oldest' : sortField === 'size' ? 'Smallest' : 'A → Z'}
-                      </button>
-                      <button
-                        onClick={() => updateSort(sortField, 'desc')}
-                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-[8px] text-[12px] font-medium transition-colors border ${
-                          sortDirection === 'desc'
-                            ? 'bg-[var(--accent)] text-white border-[var(--accent)] font-semibold'
-                            : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
-                        }`}
-                      >
-                        <ArrowDown size={13} />
-                        {sortField === 'date' ? 'Newest' : sortField === 'size' ? 'Largest' : 'Z → A'}
-                      </button>
-                    </div>
+                    {sortField === 'type' ? (
+                      <>
+                        <div className="flex items-center justify-between px-2 py-1 mb-1">
+                          <span className="text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                            Format Options
+                          </span>
+                          <div className="flex items-center bg-[var(--bg-neutral)] rounded-[7px] p-0.5 border border-[var(--border-subtle)] text-[11px]">
+                            <button
+                              onClick={() => {
+                                setTypeFilterOnly(false);
+                                localStorage.setItem('smartvault-type-filter-only', 'false');
+                              }}
+                              className={`px-2 py-0.5 rounded-[5px] font-medium transition-all ${
+                                !typeFilterOnly 
+                                  ? 'bg-[var(--bg-surface)] text-[var(--accent)] shadow-xs font-semibold' 
+                                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                              }`}
+                              title="Places the selected format at the top of the file list"
+                            >
+                              Top
+                            </button>
+                            <button
+                              onClick={() => {
+                                setTypeFilterOnly(true);
+                                localStorage.setItem('smartvault-type-filter-only', 'true');
+                              }}
+                              className={`px-2 py-0.5 rounded-[5px] font-medium transition-all ${
+                                typeFilterOnly 
+                                  ? 'bg-[var(--bg-surface)] text-[var(--accent)] shadow-xs font-semibold' 
+                                  : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
+                              }`}
+                              title="Filters the view to only show this format"
+                            >
+                              Only
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-0.5 max-h-56 overflow-y-auto pr-0.5">
+                          {[
+                            { id: 'csv' as FileTypeOption, label: 'CSV / Excel', desc: 'CSV, XLSX, XLS, Spreadsheets', count: typeCounts.csv, tagBg: 'bg-[#007aff18] text-[#007aff]' },
+                            { id: 'image' as FileTypeOption, label: 'Images', desc: 'All image types (PNG, JPG, WebP, SVG, GIF)', count: typeCounts.image, tagBg: 'bg-[#34c75918] text-[#34c759]' },
+                            { id: 'pdf' as FileTypeOption, label: 'PDF Documents', desc: 'PDF files', count: typeCounts.pdf, tagBg: 'bg-[#ff3b3018] text-[#ff3b30]' },
+                            { id: 'document' as FileTypeOption, label: 'Word & Docs', desc: 'DOC, DOCX, TXT', count: typeCounts.document, tagBg: 'bg-[#5856d618] text-[#5856d6]' },
+                            { id: 'media' as FileTypeOption, label: 'Video & Audio', desc: 'MP4, MOV, MP3', count: typeCounts.media, tagBg: 'bg-[#ff950018] text-[#ff9500]' },
+                            { id: 'archive' as FileTypeOption, label: 'Archives (ZIP)', desc: 'ZIP, RAR, 7Z', count: typeCounts.archive, tagBg: 'bg-[#af52de18] text-[#af52de]' },
+                            { id: 'group' as FileTypeOption, label: 'Group All Types', desc: 'Cluster files into type categories', count: filteredFiles.length, tagBg: 'bg-[var(--bg-neutral)] text-[var(--text-secondary)]' },
+                          ].map((t) => {
+                            const isChosen = typePriority === t.id;
+                            return (
+                              <button
+                                key={t.id}
+                                onClick={() => {
+                                  setTypePriority(t.id);
+                                  localStorage.setItem('smartvault-type-priority', t.id);
+                                }}
+                                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-[9px] text-left transition-colors ${
+                                  isChosen 
+                                    ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-semibold' 
+                                    : 'hover:bg-[var(--bg-neutral)] text-[var(--text-primary)] font-medium'
+                                }`}
+                              >
+                                <div className="flex flex-col min-w-0 pr-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[13px] leading-tight">{t.label}</span>
+                                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-semibold ${t.tagBg}`}>
+                                      {t.count}
+                                    </span>
+                                  </div>
+                                  <span className="text-[11px] text-[var(--text-tertiary)] font-normal leading-tight mt-0.5 truncate">
+                                    {t.desc}
+                                  </span>
+                                </div>
+                                {isChosen && <Check size={16} className="text-[var(--accent)] shrink-0 ml-1" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="px-2.5 py-1 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                          Direction
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <button
+                            onClick={() => updateSort(sortField, 'asc')}
+                            className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-[9px] text-[12px] font-medium transition-colors border ${
+                              sortDirection === 'asc'
+                                ? 'bg-[var(--accent)] text-white border-[var(--accent)] font-semibold shadow-xs'
+                                : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
+                            }`}
+                          >
+                            <ArrowUp size={13} />
+                            {sortField === 'date' ? 'Oldest' : sortField === 'size' ? 'Smallest' : 'A → Z'}
+                          </button>
+                          <button
+                            onClick={() => updateSort(sortField, 'desc')}
+                            className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-[9px] text-[12px] font-medium transition-colors border ${
+                              sortDirection === 'desc'
+                                ? 'bg-[var(--accent)] text-white border-[var(--accent)] font-semibold shadow-xs'
+                                : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
+                            }`}
+                          >
+                            <ArrowDown size={13} />
+                            {sortField === 'date' ? 'Newest' : sortField === 'size' ? 'Largest' : 'Z → A'}
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
