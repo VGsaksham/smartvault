@@ -215,8 +215,8 @@
     "semantic_hash": ""
   },
   "smartvault-api/server.js": {
-    "mtime": 1791695871.5649261,
-    "ast_hash": "cf1b8c1ff769911f99019c32c6c9565c",
+    "mtime": 1791698324.5382774,
+    "ast_hash": "9f094b9323c8e3b3686c0abe48431c37",
     "semantic_hash": ""
   },
   "smartvault-api/src/config/env.js": {
@@ -410,8 +410,8 @@
     "semantic_hash": ""
   },
   "src/components/MainDashboard.tsx": {
-    "mtime": 1791696165.488964,
-    "ast_hash": "bb26ba8dcda6478ad7aa36bdc1d5a5ef",
+    "mtime": 1791720166.488564,
+    "ast_hash": "dd6c680690851dff007ef7ec254f8bad",
     "semantic_hash": ""
   },
   "src/components/RecentView.tsx": {
@@ -440,8 +440,8 @@
     "semantic_hash": "90bc05664ec2ef8574ffb674373a2bef"
   },
   "src/components/TopBar.tsx": {
-    "mtime": 1787237488.2068133,
-    "ast_hash": "0ee26a7d42ec06b1bf9bb65d8ae05da5",
+    "mtime": 1791714209.8260617,
+    "ast_hash": "47c0bbb3c8ae42022c6430e00e2bdfb9",
     "semantic_hash": ""
   },
   "src/components/ui/Select.tsx": {

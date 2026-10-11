@@ -1,16 +1,16 @@
 # Graph Report - smartvault  (2026-10-11)
 
 ## Corpus Check
-- 181 files · ~94,656 words
+- 181 files · ~97,422 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 912 nodes · 1039 edges · 142 communities (63 shown, 79 thin omitted)
+- 916 nodes · 1044 edges · 142 communities (63 shown, 79 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 24 edges (avg confidence: 0.5)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `20e6578c`
+- Built from commit: `0d574f96`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -170,8 +170,8 @@
   src/app/(app)/admin/structure/page.tsx → src/lib/api.ts
 - `UsersPageContent()` --calls--> `apiUrl()`  [EXTRACTED]
   src/app/(app)/admin/users/page.tsx → src/lib/api.ts
-- `StarredView()` --calls--> `apiUrl()`  [EXTRACTED]
-  src/components/StarredView.tsx → src/lib/api.ts
+- `AdminBackupsPage()` --calls--> `apiUrl()`  [EXTRACTED]
+  src/app/(app)/admin/backups/page.tsx → src/lib/api.ts
 
 ## Import Cycles
 - None detected.
@@ -210,8 +210,8 @@ Cohesion: 0.10
 Nodes (21): axios, @cyntler/react-doc-viewer, highlight.js, lightningcss-linux-x64-gnu, lucide-react, next, @next/swc-linux-x64-gnu, dependencies (+13 more)
 
 ### Community 5 - "Community 5"
-Cohesion: 0.14
-Nodes (11): DuplicateReport(), AdminDashboardContent(), LoginPage(), FolderPreviewPageInner(), AuthHeartbeat(), CategoryDashboard(), DeptStats, SearchFilters() (+3 more)
+Cohesion: 0.12
+Nodes (11): DuplicateReport(), AdminDashboardContent(), LoginPage(), FolderPreviewPageInner(), CategoryDashboard(), DeptStats, SearchFilters(), StarredView() (+3 more)
 
 ### Community 6 - "Community 6"
 Cohesion: 0.07
@@ -219,7 +219,7 @@ Nodes (28): eslint, eslint-config-next, node-ssh, devDependencies, eslint, eslin
 
 ### Community 7 - "Community 7"
 Cohesion: 0.18
-Nodes (11): inter, metadata, ConfirmProvider(), Sidebar(), ThemeProvider(), decodeJwtPayload(), TopBar(), SidebarContext (+3 more)
+Nodes (11): inter, metadata, AuthHeartbeat(), Sidebar(), ThemeProvider(), decodeJwtPayload(), TopBar(), SidebarContext (+3 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.17
@@ -230,16 +230,16 @@ Nodes (10): bcrypt, {
 }, env, express, { getEffectiveUserSettings }, jwt, { logAction }, pool (+2 more)
 
 ### Community 9 - "Community 9"
-Cohesion: 0.15
-Nodes (13): AdminBackupsPage(), BackupConfig, BackupItem, fmtBytes(), PreviewResponse, Masterfolder, MasterfoldersAdminPage(), AuditLog (+5 more)
+Cohesion: 0.14
+Nodes (14): AdminBackupsPage(), BackupConfig, BackupItem, fmtBytes(), PreviewResponse, Masterfolder, MasterfoldersAdminPage(), AuditLog (+6 more)
 
 ### Community 10 - "Community 10"
 Cohesion: 0.24
 Nodes (13): assertWritableDir(), checkDbSnapshot(), checkMinio(), env, fail(), fs, main(), Minio (+5 more)
 
 ### Community 11 - "Community 11"
-Cohesion: 0.19
-Nodes (6): FileGrid(), FileGridProps, formatBytes(), getFileIcon(), RecentView(), StarredView()
+Cohesion: 0.31
+Nodes (5): FileGrid(), FileGridProps, formatBytes(), getFileIcon(), RecentView()
 
 ### Community 12 - "Community 12"
 Cohesion: 0.10
@@ -270,8 +270,8 @@ Cohesion: 0.08
 Nodes (23): 10. Script index (in repo), 11. Credentials reference (change in production), 1.1 What you need, 1.2 Layout (NVMe — default in scripts), 1.3 Ports, 1.4 Dev machine: sync backend into repo, 1. Before you start, 2. Deploy overview (order matters) (+15 more)
 
 ### Community 19 - "Community 19"
-Cohesion: 0.31
-Nodes (6): escapeCsv(), getCsvCell(), MainDashboard(), parseCsvTable(), StructureCategory, UploadQueueItem
+Cohesion: 0.21
+Nodes (10): escapeCsv(), FileTypeOption, getCsvCell(), getFileCategory(), MainDashboard(), parseCsvTable(), SortDirection, SortField (+2 more)
 
 ### Community 20 - "Community 20"
 Cohesion: 0.25
@@ -413,7 +413,7 @@ Cohesion: 0.50
 Nodes (3): fs, lines, reqIdx
 
 ## Knowledge Gaps
-- **474 isolated node(s):** `pool`, `{ getUsermasterfolderAccess }`, `pool`, `fs`, `lines` (+469 more)
+- **477 isolated node(s):** `pool`, `{ getUsermasterfolderAccess }`, `pool`, `fs`, `lines` (+472 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **79 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -421,13 +421,13 @@ Nodes (3): fs, lines, reqIdx
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `apiUrl()` connect `Community 5` to `Community 7`, `Community 9`, `Community 11`, `Community 15`, `Community 19`, `Community 22`, `Community 29`?**
-  _High betweenness centrality (0.007) - this node is a cross-community bridge._
+  _High betweenness centrality (0.008) - this node is a cross-community bridge._
 - **Why does `createBackupSnapshot()` connect `Community 0` to `Community 16`, `Community 1`?**
   _High betweenness centrality (0.002) - this node is a cross-community bridge._
 - **Why does `dependencies` connect `Community 4` to `Community 6`?**
   _High betweenness centrality (0.002) - this node is a cross-community bridge._
 - **What connects `pool`, `{ getUsermasterfolderAccess }`, `pool` to the rest of the system?**
-  _474 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _477 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.07890070921985816 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**

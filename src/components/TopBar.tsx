@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { Search, User, Menu, X, Calendar, Folder, FileText } from 'lucide-react';
+import { Search, User, Menu, X, Calendar, Folder, FileText, Pin } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
 import { useSidebar } from '@/context/SidebarContext';
 
@@ -28,11 +28,60 @@ export default function TopBar() {
 
   const [masterfolderId, setMasterfolderId] = useState<string>("");
   const [ismasterfolderOpen, setIsmasterfolderOpen] = useState(false);
-  
+  const [masterfolderFilter, setMasterfolderFilter] = useState('');
+  const [pinnedMasterfolderIds, setPinnedMasterfolderIds] = useState<string[]>([]);
+  const masterfolderRef = useRef<HTMLDivElement | null>(null);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
 
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState<{ username?: string; role?: string } | null>(null);
   const [allowedMasterfolderIds, setAllowedMasterfolderIds] = useState<number[] | null>(null);
+
+  useEffect(() => {
+    try {
+      const storedPins = localStorage.getItem('smartvault_pinned_masterfolders');
+      if (storedPins) {
+        const parsed = JSON.parse(storedPins);
+        if (Array.isArray(parsed)) {
+          setPinnedMasterfolderIds(parsed.map(String));
+        }
+      }
+    } catch {}
+  }, []);
+
+  const togglePinMasterfolder = (id: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    setPinnedMasterfolderIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      try {
+        localStorage.setItem('smartvault_pinned_masterfolders', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    if (!ismasterfolderOpen) {
+      setMasterfolderFilter('');
+    }
+  }, [ismasterfolderOpen]);
+
+  const filteredMasterfolders = useMemo(() => {
+    if (!masterfolderFilter.trim()) return masterfolders;
+    const q = masterfolderFilter.trim().toLowerCase();
+    return masterfolders.filter((c) => c.name?.toLowerCase().includes(q));
+  }, [masterfolders, masterfolderFilter]);
+
+  const pinnedMasterfolders = useMemo(() => {
+    return filteredMasterfolders.filter((c) => pinnedMasterfolderIds.includes(String(c.id)));
+  }, [filteredMasterfolders, pinnedMasterfolderIds]);
+
+  const unpinnedMasterfolders = useMemo(() => {
+    return filteredMasterfolders.filter((c) => !pinnedMasterfolderIds.includes(String(c.id)));
+  }, [filteredMasterfolders, pinnedMasterfolderIds]);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   // Search UI is intentionally NOT synced to URL params.
@@ -163,19 +212,29 @@ export default function TopBar() {
 
   useEffect(() => {
     const onOutsideClick = (e: MouseEvent) => {
-      if (!searchRef.current) return;
-      if (!searchRef.current.contains(e.target as Node)) setIsSearchOpen(false);
+      const target = e.target as Node;
+      if (searchRef.current && !searchRef.current.contains(target)) {
+        setIsSearchOpen(false);
+      }
+      if (masterfolderRef.current && !masterfolderRef.current.contains(target)) {
+        setIsmasterfolderOpen(false);
+      }
+      if (userMenuRef.current && !userMenuRef.current.contains(target)) {
+        setIsUserMenuOpen(false);
+      }
     };
-    window.addEventListener('mousedown', onOutsideClick);
-    return () => window.removeEventListener('mousedown', onOutsideClick);
+    document.addEventListener('mousedown', onOutsideClick);
+    return () => document.removeEventListener('mousedown', onOutsideClick);
   }, []);
 
   const handlemasterfolderChange = (id: string) => {
-    setMasterfolderId(id);
     setIsmasterfolderOpen(false);
-    const params = new URLSearchParams(searchParams);
-    params.set('masterfolderId', id);
-    router.replace(`${pathname}?${params.toString()}`);
+    if (id !== masterfolderId) {
+      setMasterfolderId(id);
+      const params = new URLSearchParams(searchParams);
+      params.set('masterfolderId', id);
+      router.replace(`${pathname}?${params.toString()}`);
+    }
   };
 
   useEffect(() => {
@@ -300,35 +359,148 @@ export default function TopBar() {
 
           {/* Masterfolder Dropdown — hidden on mobile, visible on md+ */}
           <div className="hidden md:flex items-center gap-2">
-            <div className="relative">
-              <button
-                onClick={() => setIsmasterfolderOpen(!ismasterfolderOpen)}
-                className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] font-medium text-[var(--text-secondary)] transition-colors min-w-[140px] justify-between cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
-              >
-                <span className="truncate">{masterfolders.find(c => String(c.id) === masterfolderId)?.name || 'Loading...'}</span>
-                <span className="text-[9px] text-[var(--text-tertiary)] opacity-60 ml-1">▼</span>
-              </button>
-              {ismasterfolderOpen && (
-                <>
-                  <div className="fixed inset-0 z-40" onClick={() => setIsmasterfolderOpen(false)} />
-                  <div className="absolute top-[calc(100%+4px)] left-0 w-[240px] rounded-[10px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] z-50 py-1 max-h-[300px] overflow-y-auto">
-                    {masterfolders.length === 0 ? (
-                      <div className="px-3 py-2 text-[12px] text-[var(--text-tertiary)]">No masterfolders available</div>
-                    ) : (
-                      masterfolders.map((c) => (
+            <div ref={masterfolderRef} className="relative">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setIsmasterfolderOpen(!ismasterfolderOpen)}
+                  className="flex items-center gap-2 px-3 py-1.5 bg-[var(--bg-surface)] hover:bg-[var(--bg-neutral)] border border-[var(--border-subtle)] rounded-[8px] text-[13px] font-medium text-[var(--text-secondary)] transition-colors min-w-[140px] max-w-[210px] justify-between cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--accent)]/20"
+                >
+                  <div className="flex items-center gap-1.5 truncate">
+                    {pinnedMasterfolderIds.includes(masterfolderId) && (
+                      <Pin size={11} className="text-[var(--accent)] fill-current shrink-0" />
+                    )}
+                    <span className="truncate">{masterfolders.find(c => String(c.id) === masterfolderId)?.name || 'Loading...'}</span>
+                  </div>
+                  <span className="text-[9px] text-[var(--text-tertiary)] opacity-60 ml-1">▼</span>
+                </button>
+
+                {/* Quick Access Pinned Chips (visible on xl+ screens) */}
+                {pinnedMasterfolders.length > 0 && (
+                  <div className="hidden xl:flex items-center gap-1.5">
+                    {pinnedMasterfolders.slice(0, 3).map((comp) => {
+                      const isActive = masterfolderId === String(comp.id);
+                      return (
                         <button
-                          key={c.id}
-                          onClick={() => handlemasterfolderChange(String(c.id))}
-                          className={`w-full text-left px-3 py-2 text-[13px] hover:bg-[var(--bg-neutral)] transition-colors ${masterfolderId === String(c.id) ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-semibold' : 'text-[var(--text-primary)]'}`}
+                          key={comp.id}
+                          type="button"
+                          onClick={() => handlemasterfolderChange(String(comp.id))}
+                          title={`Switch to ${comp.name}`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1 text-[12px] rounded-[7px] border transition-all cursor-pointer max-w-[130px] truncate ${
+                            isActive
+                              ? 'bg-[var(--accent-soft)] text-[var(--accent)] border-[var(--accent)]/30 font-semibold shadow-xs'
+                              : 'bg-[var(--bg-surface)] hover:bg-[var(--bg-neutral)] text-[var(--text-secondary)] hover:text-[var(--text-primary)] border-[var(--border-subtle)]'
+                          }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <span className="truncate">{c.name}</span>
-                          </div>
+                          <Pin size={10} className={isActive ? 'text-[var(--accent)] fill-current shrink-0' : 'text-[var(--text-tertiary)] fill-current shrink-0 opacity-70'} />
+                          <span className="truncate">{comp.name}</span>
                         </button>
-                      ))
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {ismasterfolderOpen && (
+                <div className="absolute top-[calc(100%+4px)] left-0 w-[260px] rounded-[10px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] z-50 py-1 max-h-[340px] flex flex-col">
+                  {masterfolders.length > 5 && (
+                    <div className="px-2 pt-1 pb-1.5 border-b border-[var(--border-subtle)]">
+                      <div className="relative">
+                        <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
+                        <input
+                          type="text"
+                          value={masterfolderFilter}
+                          onChange={(e) => setMasterfolderFilter(e.target.value)}
+                          placeholder="Search masterfolders..."
+                          className="w-full bg-[var(--bg-elevated)] text-[12px] text-[var(--text-primary)] pl-7 pr-6 py-1 rounded-[6px] border border-transparent focus:border-[var(--accent)] focus:outline-none placeholder:text-[var(--text-tertiary)]"
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        {masterfolderFilter && (
+                          <button
+                            type="button"
+                            onClick={() => setMasterfolderFilter('')}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+                          >
+                            <X size={11} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="overflow-y-auto max-h-[280px] py-1">
+                    {filteredMasterfolders.length === 0 ? (
+                      <div className="px-3 py-2 text-[12px] text-[var(--text-tertiary)]">
+                        {masterfolders.length === 0 ? 'No masterfolders available' : 'No matching masterfolders'}
+                      </div>
+                    ) : (
+                      <>
+                        {/* Pinned section */}
+                        {pinnedMasterfolders.length > 0 && (
+                          <div>
+                            <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] flex items-center gap-1 select-none">
+                              <Pin size={10} className="text-[var(--accent)] fill-current" />
+                              <span>Pinned</span>
+                            </div>
+                            {pinnedMasterfolders.map((c) => {
+                              const isSelected = masterfolderId === String(c.id);
+                              return (
+                                <div
+                                  key={c.id}
+                                  onClick={() => handlemasterfolderChange(String(c.id))}
+                                  className={`group flex items-center justify-between px-3 py-1.5 text-[13px] hover:bg-[var(--bg-neutral)] transition-colors cursor-pointer ${
+                                    isSelected ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-semibold' : 'text-[var(--text-primary)]'
+                                  }`}
+                                >
+                                  <span className="truncate pr-2">{c.name}</span>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => togglePinMasterfolder(String(c.id), e)}
+                                    title="Unpin masterfolder"
+                                    className="p-1 rounded-[4px] hover:bg-[var(--border-subtle)] text-[var(--accent)] hover:text-[var(--text-tertiary)] transition-colors cursor-pointer"
+                                  >
+                                    <Pin size={12} className="fill-current" />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                            <div className="my-1 border-t border-[var(--border-subtle)]" />
+                          </div>
+                        )}
+
+                        {/* Unpinned / Other masterfolders section */}
+                        {pinnedMasterfolders.length > 0 && unpinnedMasterfolders.length > 0 && (
+                          <div className="px-3 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-tertiary)] select-none">
+                            Other Masterfolders
+                          </div>
+                        )}
+
+                        {unpinnedMasterfolders.map((c) => {
+                          const isSelected = masterfolderId === String(c.id);
+                          return (
+                            <div
+                              key={c.id}
+                              onClick={() => handlemasterfolderChange(String(c.id))}
+                              className={`group flex items-center justify-between px-3 py-1.5 text-[13px] hover:bg-[var(--bg-neutral)] transition-colors cursor-pointer ${
+                                isSelected ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-semibold' : 'text-[var(--text-primary)]'
+                              }`}
+                            >
+                              <span className="truncate pr-2">{c.name}</span>
+                              <button
+                                type="button"
+                                onClick={(e) => togglePinMasterfolder(String(c.id), e)}
+                                title="Pin masterfolder to top"
+                                className="p-1 rounded-[4px] opacity-0 group-hover:opacity-100 hover:bg-[var(--border-subtle)] text-[var(--text-tertiary)] hover:text-[var(--accent)] transition-all cursor-pointer"
+                              >
+                                <Pin size={12} />
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </>
                     )}
                   </div>
-                </>
+                </div>
               )}
             </div>
           </div>
@@ -367,7 +539,7 @@ export default function TopBar() {
             <span className="hidden sm:inline">New Upload</span>
             <span className="sm:hidden">Upload</span>
           </button>
-          <div className="relative">
+          <div ref={userMenuRef} className="relative">
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
               className="flex items-center justify-center w-[34px] h-[34px] rounded-full hover:bg-[var(--bg-neutral)] text-[var(--text-primary)] transition-colors cursor-pointer border border-[var(--border-subtle)]"
@@ -375,21 +547,18 @@ export default function TopBar() {
               <User size={16} />
             </button>
             {isUserMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setIsUserMenuOpen(false)} />
-                <div className="absolute right-0 top-[calc(100%+8px)] w-[220px] rounded-[12px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] z-50 overflow-hidden">
-                  <div className="px-4 py-3 border-b border-[var(--border-subtle)]">
-                    <p className="text-[13px] font-bold text-[var(--text-primary)]">{currentUser?.username || 'User'}</p>
-                    <p className="text-[11px] text-[var(--text-tertiary)]">{currentUser?.role || ''}</p>
-                  </div>
-                  <button onClick={() => goTo('/admin/users')} className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-colors">Users & Roles</button>
-                  {currentUser?.role === 'Admin' && (
-                    <button onClick={() => goTo('/admin/masterfolders')} className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-colors">Masterfolders</button>
-                  )}
-                  <div className="h-[1px] bg-[var(--border-subtle)]" />
-                  <button onClick={handleLogout} className="w-full text-left px-4 py-2.5 text-[13px] text-[#ff5b52] hover:bg-[#ff5b5210] transition-colors">Sign Out</button>
+              <div className="absolute right-0 top-[calc(100%+8px)] w-[220px] rounded-[12px] bg-[var(--bg-surface)] border border-[var(--border-default)] shadow-[var(--shadow-medium)] z-50 overflow-hidden">
+                <div className="px-4 py-3 border-b border-[var(--border-subtle)]">
+                  <p className="text-[13px] font-bold text-[var(--text-primary)]">{currentUser?.username || 'User'}</p>
+                  <p className="text-[11px] text-[var(--text-tertiary)]">{currentUser?.role || ''}</p>
                 </div>
-              </>
+                <button onClick={() => goTo('/admin/users')} className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-colors">Users & Roles</button>
+                {currentUser?.role === 'Admin' && (
+                  <button onClick={() => goTo('/admin/masterfolders')} className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-colors">Masterfolders</button>
+                )}
+                <div className="h-[1px] bg-[var(--border-subtle)]" />
+                <button onClick={handleLogout} className="w-full text-left px-4 py-2.5 text-[13px] text-[#ff5b52] hover:bg-[#ff5b5210] transition-colors">Sign Out</button>
+              </div>
             )}
           </div>
         </div>

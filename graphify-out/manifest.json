@@ -410,8 +410,8 @@
     "semantic_hash": ""
   },
   "src/components/MainDashboard.tsx": {
-    "mtime": 1791698627.297168,
-    "ast_hash": "7c40c2ae037bba35ae457adca8823dc3",
+    "mtime": 1791720166.488564,
+    "ast_hash": "dd6c680690851dff007ef7ec254f8bad",
     "semantic_hash": ""
   },
   "src/components/RecentView.tsx": {
@@ -440,8 +440,8 @@
     "semantic_hash": "90bc05664ec2ef8574ffb674373a2bef"
   },
   "src/components/TopBar.tsx": {
-    "mtime": 1787237488.2068133,
-    "ast_hash": "0ee26a7d42ec06b1bf9bb65d8ae05da5",
+    "mtime": 1791720906.2601955,
+    "ast_hash": "a0370706b84399c2c32700650895330e",
     "semantic_hash": ""
   },
   "src/components/ui/Select.tsx": {
