@@ -1341,13 +1341,20 @@ app.get('/api/structure', verifyToken, async (req, res) => {
       return res.status(400).json({ error: 'masterfolderId is required.' });
     }
 
+    if (adminRoutes && adminRoutes.ensuremasterfolderStructureSchema) {
+      await adminRoutes.ensuremasterfolderStructureSchema(pool).catch(() => {});
+    }
+
     const deptRows = await pool.query(
       `SELECT id, name
        FROM masterfolder_categories
        WHERE masterfolder_id = $1
        ORDER BY LOWER(name) ASC`,
       [masterfolderId]
-    ).catch(() => ({ rows: [] }));
+    ).catch((err) => {
+      console.error('[API /structure] Error fetching categories:', err.message);
+      return { rows: [] };
+    });
 
     let categories = deptRows.rows.map((d) => ({ id: d.id, name: d.name }));
 
@@ -1378,27 +1385,58 @@ app.get('/api/structure', verifyToken, async (req, res) => {
     }
 
     const deptIds = categories.map((d) => d.id);
-    const folderRows = deptIds.length
-      ? await pool.query(
-          `SELECT f.id, f.category_id, f.parent_folder_id, f.name, ufa.alias_name as user_alias
+    let folderRows = { rows: [] };
+    if (deptIds.length > 0) {
+      try {
+        folderRows = await pool.query(
+          `SELECT f.id, f.category_id, f.parent_folder_id, f.name, 
+                  (s.id IS NOT NULL) as starred,
+                  ufa.alias_name as user_alias
            FROM masterfolder_category_folders f
+           LEFT JOIN starred_folders s ON s.folder_id = f.id AND s.user_id = $2
            LEFT JOIN user_folder_aliases ufa ON ufa.folder_id = f.id AND ufa.user_id = $2
            WHERE f.category_id = ANY($1::int[])
            ORDER BY LOWER(f.name) ASC`,
           [deptIds, req.user.id]
-        ).catch(() => ({ rows: [] }))
-      : { rows: [] };
+        );
+      } catch (aliasErr) {
+        console.warn('[API /structure] Query with user_folder_aliases failed, retrying without alias table:', aliasErr.message);
+        folderRows = await pool.query(
+          `SELECT f.id, f.category_id, f.parent_folder_id, f.name,
+                  (s.id IS NOT NULL) as starred,
+                  NULL as user_alias
+           FROM masterfolder_category_folders f
+           LEFT JOIN starred_folders s ON s.folder_id = f.id AND s.user_id = $2
+           WHERE f.category_id = ANY($1::int[])
+           ORDER BY LOWER(f.name) ASC`,
+          [deptIds, req.user.id]
+        ).catch((err2) => {
+          console.error('[API /structure] Fallback folder query failed:', err2.message);
+          return { rows: [] };
+        });
+      }
+    }
 
     const byDept = new Map();
     for (const f of folderRows.rows) {
       if (!byDept.has(f.category_id)) byDept.set(f.category_id, []);
-      byDept.get(f.category_id).push({ id: f.id, name: f.name, parent_folder_id: f.parent_folder_id || null, user_alias: f.user_alias || null });
+      byDept.get(f.category_id).push({
+        id: f.id,
+        name: f.name,
+        parent_folder_id: f.parent_folder_id || null,
+        starred: Boolean(f.starred),
+        user_alias: f.user_alias || null
+      });
     }
 
     res.json({
       masterfolder_id: masterfolderId,
       fy_id: fyId,
-      categories: categories.map((d) => ({ name: d.name, folders: byDept.get(d.id) || [] })),
+      categories: categories.map((d) => ({
+        id: d.id,
+        name: d.name,
+        folders: byDept.get(d.id) || []
+      })),
     });
   } catch (err) {
     res.status(500).json({ error: `Failed to load structure: ${err.message}` });
@@ -2598,6 +2636,14 @@ app.listen(PORT, HOST, async () => {
     await ensureUsermasterfolderAccessSchema(pool);
   } catch (e) {
     console.error('[Startup] Failed to ensure user_masterfolder_access schema:', e.message);
+  }
+
+  try {
+    if (adminRoutes && adminRoutes.ensuremasterfolderStructureSchema) {
+      await adminRoutes.ensuremasterfolderStructureSchema(pool);
+    }
+  } catch (e) {
+    console.error('[Startup] Failed to ensure masterfolder structure schema:', e.message);
   }
 
   // Run FY sync immediately on server boot (only if enabled)

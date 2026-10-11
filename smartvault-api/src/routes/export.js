@@ -112,7 +112,7 @@ router.get('/user-aliases/export/files', verifyToken, async (req, res) => {
 router.get('/user-aliases/export/folders', verifyToken, async (req, res) => {
   const { category, masterfolderId, dummyNull } = req.query;
   try {
-    const deptRes = await pool.query(`SELECT id FROM masterfolder_categories WHERE name = $1 AND masterfolder_id = $2 `, [category, masterfolderId, dummyNull]);
+    const deptRes = await pool.query(`SELECT id FROM masterfolder_categories WHERE name = $1 AND masterfolder_id = $2`, [category, masterfolderId]);
     if (deptRes.rows.length === 0) return res.send('Folder ID,Folder Path,My Name\n');
     const categoryId = deptRes.rows[0].id;
     

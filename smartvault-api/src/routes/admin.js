@@ -48,6 +48,28 @@ async function ensuremasterfolderStructureSchema(db = pool) {
     );
   `);
 
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS user_folder_aliases (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      folder_id INTEGER NOT NULL REFERENCES masterfolder_category_folders(id) ON DELETE CASCADE,
+      alias_name VARCHAR(500) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY (user_id, folder_id)
+    );
+  `).catch(() => {});
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS user_file_aliases (
+      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      file_id INTEGER NOT NULL REFERENCES vault_files(id) ON DELETE CASCADE,
+      alias_name VARCHAR(500) NOT NULL,
+      created_at TIMESTAMP DEFAULT NOW(),
+      updated_at TIMESTAMP DEFAULT NOW(),
+      PRIMARY KEY (user_id, file_id)
+    );
+  `).catch(() => {});
+
   // Add parent_folder_id column if it doesn't exist (migration for existing installs)
   await db.query(`
     ALTER TABLE masterfolder_category_folders
@@ -759,4 +781,5 @@ router.post('/backup-schedule', verifyToken, async (req, res) => {
   }
 });
 
+router.ensuremasterfolderStructureSchema = ensuremasterfolderStructureSchema;
 module.exports = router;

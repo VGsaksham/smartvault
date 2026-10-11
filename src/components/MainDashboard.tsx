@@ -383,7 +383,7 @@ const toggleDarkMode = () => {
       await fetch(apiUrl(`/api/folders/${folderId}/star`), {
         method: 'POST', headers: { 'Authorization': `Bearer ${token}` }
       });
-      fetch(apiUrl(`/api/admin/structure?masterfolderId=${masterfolderId}`), { headers: { 'Authorization': `Bearer ${token}` } })
+      fetch(apiUrl(`/api/structure?masterfolderId=${masterfolderId}`), { headers: { 'Authorization': `Bearer ${token}` } })
         .then(r => r.json())
         .then(d => { if (d.categories) setStructureCategories(d.categories); });
     } catch (e) { console.error('Folder star toggle failed', e); }
@@ -449,8 +449,7 @@ const toggleDarkMode = () => {
       const token = localStorage.getItem('token');
       if (!token || !masterfolderId) return;
       const detailCompany = ev?.detail?.masterfolderId;
-      const detailFy = ev?.detail?.dummyNull;
-      if (Number(detailCompany) !== Number(masterfolderId) ) return;
+      if (detailCompany && Number(detailCompany) !== Number(masterfolderId)) return;
       const params = new URLSearchParams({ masterfolderId, fyId: '1' });
       fetch(apiUrl(`/api/structure?${params.toString()}`), {
         headers: { Authorization: `Bearer ${token}` }
@@ -476,26 +475,26 @@ const toggleDarkMode = () => {
       const name = String((d as any)?.name || '').trim();
       if (!name) continue;
       const folders: any[] = Array.isArray((d as any)?.folders) ? (d as any).folders : [];
-      const folderById = new Map<number, any>(folders.map((f: any) => [f.id, f]));
+      const folderById = new Map<number, any>(folders.map((f: any) => [Number(f.id), f]));
       
       const getPath = (id: number, visited = new Set<number>()): string => {
         if (visited.has(id)) return '';
         visited.add(id);
-        const f = folderById.get(id);
+        const f = folderById.get(Number(id));
         if (!f) return '';
         if (!f.parent_folder_id) return String(f.name || '');
-        const parentPath = getPath(f.parent_folder_id, visited);
+        const parentPath = getPath(Number(f.parent_folder_id), visited);
         return parentPath ? `${parentPath}/${f.name}` : String(f.name || '');
       };
 
       const getAliasPath = (id: number, visited = new Set<number>()): string => {
         if (visited.has(id)) return '';
         visited.add(id);
-        const f = folderById.get(id);
+        const f = folderById.get(Number(id));
         if (!f) return '';
         const namePart = f.user_alias || f.name || '';
         if (!f.parent_folder_id) return String(namePart);
-        const parentPath = getAliasPath(f.parent_folder_id, visited);
+        const parentPath = getAliasPath(Number(f.parent_folder_id), visited);
         return parentPath ? `${parentPath}/${namePart}` : String(namePart);
       };
       
@@ -504,10 +503,10 @@ const toggleDarkMode = () => {
         if (typeof f === 'string') {
           paths.push(f);
         } else {
-          const original = getPath(f.id);
-          const alias = getAliasPath(f.id);
+          const original = getPath(Number(f.id));
+          const alias = getAliasPath(Number(f.id));
           paths.push(original);
-          idMap[`${name}::${original}`] = f.id;
+          idMap[`${name}::${original}`] = Number(f.id);
           if (f.starred) starredPaths.add(`${name}::${original}`);
           if (original && alias && original !== alias) {
              aliasMap[`${name}::${original}`] = alias;
@@ -1353,10 +1352,11 @@ const toggleDarkMode = () => {
   const dynamicFolders = useMemo(() => {
     if (activeCategory === 'All files') return [];
     // Collect all known full paths (from structure + from actual file data)
-    const allPaths = new Set<string>(deptFoldersMap[activeCategory] || []);
+    const matchingDeptKey = Object.keys(deptFoldersMap).find(k => k.toLowerCase() === (activeCategory || '').toLowerCase()) || activeCategory;
+    const allPaths = new Set<string>(deptFoldersMap[matchingDeptKey] || []);
     if (Array.isArray(files)) {
       files.forEach(f => {
-        if (f.category === activeCategory && f.folder && f.folder !== 'null' && f.folder !== 'undefined') {
+        if (String(f.category || '').toLowerCase() === (activeCategory || '').toLowerCase() && f.folder && f.folder !== 'null' && f.folder !== 'undefined') {
           // Add every ancestor segment of the file's folder path
           const parts = String(f.folder).split('/');
           for (var i = 1; i <= parts.length; i++) {
