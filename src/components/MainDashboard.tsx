@@ -1801,7 +1801,7 @@ const renderSearchPath = (file: any) => {
                             isFolderSelected
                               ? 'border-[var(--accent)] ring-2 ring-[var(--accent)] bg-[var(--accent-soft)]'
                               : 'border-[var(--border-subtle)]'
-                          } rounded-[14px] p-4 flex flex-col items-start gap-3 hover:border-[var(--accent)] hover:shadow-[var(--shadow-medium)] transition-all text-left cursor-pointer relative select-none`}
+                          } rounded-[14px] p-4 flex flex-col items-start gap-3 hover:border-[var(--accent)] hover:shadow-[var(--shadow-medium)] transition-all text-left cursor-pointer relative select-none hover:z-30`}
                         >
                           <div className="w-full flex justify-between items-start">
                             <div className="flex items-center gap-2">
@@ -1860,8 +1860,24 @@ const renderSearchPath = (file: any) => {
                               </button>
                             </div>
                           </div>
-                          <div>
-                            <p className="text-[14px] font-semibold text-[var(--text-primary)] leading-tight">{folderName}</p>
+                          <div className="w-full min-w-0">
+                            <div className="relative group/title inline-block max-w-full">
+                              <p 
+                                title={folderName}
+                                className="text-[14px] font-semibold text-[var(--text-primary)] leading-tight truncate cursor-default"
+                              >
+                                {folderName}
+                              </p>
+                              {/* Floating Tooltip */}
+                              <div className="pointer-events-none absolute bottom-full left-0 mb-2 z-50 opacity-0 group-hover/title:opacity-100 transition-all duration-150 delay-100 translate-y-1 group-hover/title:translate-y-0 w-max max-w-[260px] sm:max-w-[320px]">
+                                <div className="bg-[#1c1c1e] text-[#f5f5f7] text-[12px] font-medium px-3 py-1.5 rounded-[9px] shadow-[0_10px_25px_-5px_rgba(0,0,0,0.4)] border border-[#38383a] backdrop-blur-md">
+                                  <p className="[overflow-wrap:anywhere] break-words font-semibold text-white leading-snug">
+                                    {folderName}
+                                  </p>
+                                </div>
+                                <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-[#1c1c1e] ml-3"></div>
+                              </div>
+                            </div>
                             <p className="text-[12px] text-[var(--text-secondary)] mt-0.5">
                               {directFileCount} file{directFileCount !== 1 ? 's' : ''}
                               {folderCount > directFileCount && ` · ${folderCount - directFileCount} in subfolders`}
@@ -1872,14 +1888,14 @@ const renderSearchPath = (file: any) => {
                     })}
                   </div>
                 ) : (
-                  <div className="flex flex-col border border-[var(--border-subtle)] rounded-[18px] bg-[var(--bg-surface)] overflow-hidden mb-6 md:mb-8">
-                    <div className="hidden sm:flex items-center px-4 md:px-6 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
+                  <div className="flex flex-col border border-[var(--border-subtle)] rounded-[18px] bg-[var(--bg-surface)] mb-6 md:mb-8">
+                    <div className="hidden sm:flex items-center px-4 md:px-6 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] rounded-t-[17px]">
                       <div className="w-10"></div>
                       <div className="flex-1 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Folder Name</div>
                       <div className="w-32 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden sm:block">Items</div>
                       <div className="w-24 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden md:block text-right pr-4">Actions</div>
                     </div>
-                    {dynamicFolders.map(folderPath => {
+                    {dynamicFolders.map((folderPath, folderIdx) => {
                       const isFolderSelected = selectedFolderPaths.includes(folderPath);
                       const folderName = folderAliasMap[`${activeCategory}::${folderPath}`]?.split('/').pop() || folderPath.split('/').pop() || folderPath;
                       const folderCount = Array.isArray(files) ? files.filter(f => f.category === activeCategory && (f.folder === folderPath || String(f.folder || '').startsWith(folderPath + '/'))).length : 0;
@@ -1889,9 +1905,9 @@ const renderSearchPath = (file: any) => {
                           key={folderPath}
                           onClick={() => toggleFolderSelection(folderPath)}
                           onDoubleClick={() => openFolder(folderPath)}
-                          className={`flex items-center px-4 md:px-6 py-4 hover:bg-[var(--bg-neutral)] transition-colors border-b border-[rgba(0,0,0,0.04)] last:border-0 cursor-pointer select-none ${
+                          className={`flex items-center px-4 md:px-6 py-4 hover:bg-[var(--bg-neutral)] transition-colors border-b border-[rgba(0,0,0,0.04)] last:border-0 cursor-pointer select-none relative hover:z-30 ${
                             isFolderSelected ? 'bg-[var(--accent-soft)]' : ''
-                          }`}
+                          } ${folderIdx === 0 ? 'rounded-t-[17px] sm:rounded-t-none' : ''} ${folderIdx === dynamicFolders.length - 1 ? 'rounded-b-[17px]' : ''}`}
                         >
                           <div className="w-10 flex items-center">
                             <div className={`w-5 h-5 rounded-[6px] border flex items-center justify-center transition-colors ${
@@ -1904,7 +1920,23 @@ const renderSearchPath = (file: any) => {
                             <div className="w-8 h-8 rounded-[8px] bg-[var(--bg-neutral)] flex items-center justify-center shrink-0">
                               <Folder size={16} className="text-[var(--text-secondary)]" />
                             </div>
-                            <span className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{folderName}</span>
+                            <div className="relative group/title min-w-0 max-w-full">
+                              <span 
+                                title={folderName}
+                                className="text-[14px] font-semibold text-[var(--text-primary)] truncate block cursor-default"
+                              >
+                                {folderName}
+                              </span>
+                              {/* Floating Tooltip */}
+                              <div className="pointer-events-none absolute bottom-full left-0 mb-2 z-50 opacity-0 group-hover/title:opacity-100 transition-all duration-150 delay-100 translate-y-1 group-hover/title:translate-y-0 w-max max-w-[280px] sm:max-w-[360px]">
+                                <div className="bg-[#1c1c1e] text-[#f5f5f7] text-[12px] font-medium px-3 py-1.5 rounded-[9px] shadow-[0_10px_25px_-5px_rgba(0,0,0,0.4)] border border-[#38383a] backdrop-blur-md">
+                                  <p className="[overflow-wrap:anywhere] break-words font-semibold text-white leading-snug">
+                                    {folderName}
+                                  </p>
+                                </div>
+                                <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-[#1c1c1e] ml-3"></div>
+                              </div>
+                            </div>
                             <button
                               onClick={(e) => { e.stopPropagation(); openFolder(folderPath); }}
                               className="text-[11px] font-medium text-[var(--accent)] hover:underline flex items-center gap-0.5 ml-1 shrink-0"
@@ -1997,21 +2029,24 @@ const renderSearchPath = (file: any) => {
       ) : (
         <>
           {viewMode === 'list' ? (
-            <div className="flex flex-col border border-[var(--border-subtle)] rounded-[18px] bg-[var(--bg-surface)] overflow-hidden">
-              <div className="hidden sm:flex items-center px-4 md:px-6 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)]">
+            <div className="flex flex-col border border-[var(--border-subtle)] rounded-[18px] bg-[var(--bg-surface)]">
+              <div className="hidden sm:flex items-center px-4 md:px-6 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] rounded-t-[17px]">
                 <div className="w-10"></div>
                 <div className="flex-1 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Name</div>
                 <div className="w-32 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden sm:block">Size</div>
                 <div className="w-32 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden md:block">Date</div>
               </div>
-              {filteredFiles.map((file) => (
+              {filteredFiles.map((file, fileIdx) => {
+                const displayName = file.user_alias || file.custom_name || file.original_name;
+                const hasAlias = Boolean(file.user_alias && file.original_name && file.user_alias !== file.original_name);
+                return (
                 <div 
                   key={file.id} 
                   id={`file-card-${file.id}`}
                   onClick={() => toggleFileSelection(file.id)}
                   onDoubleClick={() => setSelectedFile(file)}
                   onContextMenu={(e) => handleContextMenu(e, file)}
-                  className={`flex items-center px-4 md:px-6 py-4 hover:bg-[var(--bg-neutral)] transition-colors border-b border-[rgba(0,0,0,0.04)] last:border-0 cursor-pointer ${selectedFileIds.includes(file.id) ? 'bg-[var(--accent-soft)]' : ''} ${highlightedFileId === file.id ? 'bg-[var(--accent-soft)] ring-1 ring-[var(--accent)] ring-inset' : ''}`}
+                  className={`flex items-center px-4 md:px-6 py-4 hover:bg-[var(--bg-neutral)] transition-colors border-b border-[rgba(0,0,0,0.04)] last:border-0 cursor-pointer relative hover:z-30 ${selectedFileIds.includes(file.id) ? 'bg-[var(--accent-soft)]' : ''} ${highlightedFileId === file.id ? 'bg-[var(--accent-soft)] ring-1 ring-[var(--accent)] ring-inset' : ''} ${fileIdx === 0 ? 'rounded-t-[17px] sm:rounded-t-none' : ''} ${fileIdx === filteredFiles.length - 1 ? 'rounded-b-[17px]' : ''}`}
                 >
                   <div className="w-10 flex items-center">
                     <div className={`w-5 h-5 rounded-[6px] border flex items-center justify-center transition-colors ${selectedFileIds.includes(file.id) ? 'bg-[#007AFF] border-[#007AFF]' : 'border-[rgba(0,0,0,0.15)] bg-white'}`}>
@@ -2026,9 +2061,28 @@ const renderSearchPath = (file: any) => {
                     </div>
                     <div className="flex flex-col min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-[15px] font-medium text-[#1d1d1f] truncate">
-                          {file.user_alias || file.custom_name || file.original_name}
-                        </span>
+                        <div className="relative group/title min-w-0 max-w-full">
+                          <span 
+                            title={displayName}
+                            className="text-[15px] font-medium text-[#1d1d1f] truncate block cursor-default"
+                          >
+                            {displayName}
+                          </span>
+                          {/* Floating Full Name Tooltip */}
+                          <div className="pointer-events-none absolute bottom-full left-0 mb-2 z-50 opacity-0 group-hover/title:opacity-100 transition-all duration-150 delay-100 translate-y-1 group-hover/title:translate-y-0 w-max max-w-[320px] sm:max-w-[420px]">
+                            <div className="bg-[#1c1c1e] text-[#f5f5f7] text-[12px] font-medium px-3 py-2 rounded-[10px] shadow-[0_10px_25px_-5px_rgba(0,0,0,0.4),0_8px_10px_-6px_rgba(0,0,0,0.3)] border border-[#38383a] backdrop-blur-md">
+                              <p className="[overflow-wrap:anywhere] break-words font-semibold text-white leading-snug">
+                                {displayName}
+                              </p>
+                              {hasAlias && (
+                                <p className="text-[11px] text-[#a1a1a6] mt-1 [overflow-wrap:anywhere] break-words font-normal">
+                                  Original: {file.original_name}
+                                </p>
+                              )}
+                            </div>
+                            <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-[#1c1c1e] ml-4"></div>
+                          </div>
+                        </div>
                         {searchQuery && (
                           <>
                             <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${file.fy_status === 'Active' ? 'text-[#34c759] border-[#34c75940] bg-[#34c75910]' : 'text-[var(--text-secondary)] border-[var(--border-subtle)] bg-[var(--bg-neutral)]'}`}>
@@ -2057,18 +2111,22 @@ const renderSearchPath = (file: any) => {
                     {file.upload_date ? new Date(file.upload_date).toLocaleDateString() : 'Just now'}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 sm:gap-4 md:gap-6">
-              {filteredFiles.map((file) => (
+              {filteredFiles.map((file) => {
+                const displayName = file.user_alias || file.custom_name || file.original_name || 'Unknown File';
+                const hasAlias = Boolean(file.user_alias && file.original_name && file.user_alias !== file.original_name);
+                return (
                 <div 
                   key={file.id} 
                   id={`file-card-${file.id}`}
                   onClick={() => toggleFileSelection(file.id)}
                   onDoubleClick={() => setSelectedFile(file)}
                   onContextMenu={(e) => handleContextMenu(e, file)}
-                  className={`bg-[var(--bg-surface)] rounded-[18px] border ${selectedFileIds.includes(file.id) ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent)_inset] bg-[var(--accent-soft)]' : 'border-[var(--border-subtle)]'} ${highlightedFileId === file.id ? 'ring-2 ring-[var(--accent)]' : ''} p-5 md:p-[28px] flex flex-col gap-4 transition-all md:hover:scale-[1.02] hover:shadow-[var(--shadow-medium)] cursor-pointer relative select-none`}
+                  className={`bg-[var(--bg-surface)] rounded-[18px] border ${selectedFileIds.includes(file.id) ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent)_inset] bg-[var(--accent-soft)]' : 'border-[var(--border-subtle)]'} ${highlightedFileId === file.id ? 'ring-2 ring-[var(--accent)]' : ''} p-5 md:p-[28px] flex flex-col gap-4 transition-all md:hover:scale-[1.02] hover:shadow-[var(--shadow-medium)] cursor-pointer relative select-none hover:z-30`}
                 >
                   <div className="absolute top-4 right-4 z-10">
                     <button onClick={(e) => { e.stopPropagation(); toggleStar(file.id); }}>
@@ -2084,9 +2142,28 @@ const renderSearchPath = (file: any) => {
                   </div>
 
                   <div className="flex flex-col flex-1">
-                    <span className="text-[17px] font-semibold tracking-[-0.374px] text-[#1d1d1f] line-clamp-2 leading-[1.24] mb-2 break-words">
-                      {file.user_alias || file.custom_name || file.original_name || 'Unknown File'}
-                    </span>
+                    <div className="relative group/title inline-block w-full">
+                      <span 
+                        title={displayName}
+                        className="text-[17px] font-semibold tracking-[-0.374px] text-[#1d1d1f] line-clamp-2 leading-[1.24] mb-2 break-words block cursor-default"
+                      >
+                        {displayName}
+                      </span>
+                      {/* Floating Full Name Tooltip */}
+                      <div className="pointer-events-none absolute bottom-full left-0 mb-2 z-50 opacity-0 group-hover/title:opacity-100 transition-all duration-150 delay-100 translate-y-1 group-hover/title:translate-y-0 w-max max-w-[280px] sm:max-w-[340px]">
+                        <div className="bg-[#1c1c1e] text-[#f5f5f7] text-[12px] font-medium px-3 py-2 rounded-[10px] shadow-[0_10px_25px_-5px_rgba(0,0,0,0.4),0_8px_10px_-6px_rgba(0,0,0,0.3)] border border-[#38383a] backdrop-blur-md">
+                          <p className="[overflow-wrap:anywhere] break-words font-semibold text-white leading-snug">
+                            {displayName}
+                          </p>
+                          {hasAlias && (
+                            <p className="text-[11px] text-[#a1a1a6] mt-1 [overflow-wrap:anywhere] break-words font-normal">
+                              Original: {file.original_name}
+                            </p>
+                          )}
+                        </div>
+                        <div className="w-0 h-0 border-x-4 border-x-transparent border-t-4 border-t-[#1c1c1e] ml-4"></div>
+                      </div>
+                    </div>
                     {searchQuery && (
                       <div className="flex items-center gap-1.5 mb-2">
                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full border ${file.fy_status === 'Active' ? 'text-[#34c759] border-[#34c75940] bg-[#34c75910]' : 'text-[var(--text-secondary)] border-[var(--border-subtle)] bg-[var(--bg-neutral)]'}`}>
@@ -2123,7 +2200,8 @@ const renderSearchPath = (file: any) => {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </>
@@ -2143,7 +2221,7 @@ const renderSearchPath = (file: any) => {
           >
             {/* Header */}
             <div className="flex items-center justify-between gap-3 px-4 md:px-6 py-3 md:py-4 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] shrink-0">
-              <h3 className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.374px] text-[var(--text-primary)] truncate pr-1 sm:pr-4 min-w-0">
+              <h3 title={selectedFile.original_name} className="text-[15px] sm:text-[17px] font-semibold tracking-[-0.374px] text-[var(--text-primary)] truncate pr-1 sm:pr-4 min-w-0">
                 {selectedFile.original_name}
               </h3>
               

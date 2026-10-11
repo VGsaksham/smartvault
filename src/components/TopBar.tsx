@@ -528,7 +528,7 @@ export default function TopBar() {
                     <div className="flex items-center gap-3">
                       {file.type === 'folder' ? <Folder size={16} className="text-[#007aff]" /> : <FileText size={16} className="text-[var(--text-tertiary)]" />}
                       <div className="flex-1 min-w-0">
-                        <p className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
+                        <p title={file.user_alias || file.custom_name || file.original_name} className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
                           {file.user_alias || file.custom_name || file.original_name}
                         </p>
                         <div className="mt-1 text-[11px] text-[var(--text-tertiary)] flex flex-wrap items-center gap-1">
