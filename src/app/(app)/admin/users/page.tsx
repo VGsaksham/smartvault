@@ -602,7 +602,7 @@ function UsersPageContent() {
   if (!isAuthorized) return null;
 
   const bulkOps = [
-    { key: 'can_bulk_move',     label: 'Move',     danger: false },
+    { key: 'can_bulk_move',     label: 'Move Files & Folders', danger: false },
     { key: 'can_bulk_copy',     label: 'Copy',     danger: false },
     { key: 'can_bulk_rename',   label: 'Rename',   danger: false },
     { key: 'can_bulk_download', label: 'Download Files', danger: false },

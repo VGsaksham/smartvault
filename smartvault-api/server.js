@@ -566,6 +566,240 @@ app.post('/api/folders/ensure', verifyToken, express.json(), async (req, res) =>
   }
 });
 
+app.post('/api/folders/move', verifyToken, express.json(), async (req, res) => {
+  const { masterfolderId, sourceCategory, targetCategory } = req.body;
+  const rawFolderPaths = req.body.folderPaths || (req.body.folderPath ? [req.body.folderPath] : []);
+  const rawTargetFolder = req.body.targetFolder ?? req.body.destinationFolder ?? null;
+  const normalizedTargetFolder = rawTargetFolder === null || rawTargetFolder === undefined || String(rawTargetFolder).trim() === ''
+    ? null
+    : String(rawTargetFolder).trim().replace(/^\/+|\/+$/g, '');
+
+  if (!masterfolderId || !sourceCategory || !targetCategory || !Array.isArray(rawFolderPaths) || rawFolderPaths.length === 0) {
+    return res.status(400).json({ error: "masterfolderId, sourceCategory, targetCategory, and folderPaths are required." });
+  }
+
+  try {
+    await hydrateRequestUser(req);
+
+    if (req.user.role === 'Guest') {
+      return res.status(403).json({ error: "Permission denied." });
+    }
+
+    if (req.user.role !== 'Admin' && req.user.can_bulk_move === false) {
+      return res.status(403).json({ error: "You do not have permission to move files and folders." });
+    }
+
+    if (!canAccessCategory(req.user, sourceCategory, masterfolderId)) {
+      return res.status(403).json({ error: `Access denied to source category: ${sourceCategory}` });
+    }
+
+    if (!canAccessCategory(req.user, targetCategory, masterfolderId)) {
+      return res.status(403).json({ error: `Access denied to destination category: ${targetCategory}` });
+    }
+
+    if (req.user.role === 'Manager' && targetCategory !== req.user.category) {
+      return res.status(403).json({ error: "Managers can only move folders to their assigned category." });
+    }
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      const srcCatRes = await client.query(
+        `SELECT id FROM masterfolder_categories WHERE masterfolder_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+        [masterfolderId, sourceCategory]
+      );
+      if (srcCatRes.rows.length === 0) {
+        throw new Error(`Source category "${sourceCategory}" not found.`);
+      }
+      const sourceCategoryId = srcCatRes.rows[0].id;
+
+      const tgtCatRes = await client.query(
+        `SELECT id FROM masterfolder_categories WHERE masterfolder_id = $1 AND LOWER(name) = LOWER($2) LIMIT 1`,
+        [masterfolderId, targetCategory]
+      );
+      if (tgtCatRes.rows.length === 0) {
+        throw new Error(`Destination category "${targetCategory}" not found.`);
+      }
+      const targetCategoryId = tgtCatRes.rows[0].id;
+
+      let targetParentFolderId = null;
+      if (normalizedTargetFolder) {
+        const targetParts = normalizedTargetFolder.split('/').filter(Boolean);
+        targetParentFolderId = await ensureFolderHierarchy(client, masterfolderId, targetCategory, targetParts);
+      }
+
+      // Filter and sort folder paths to avoid duplicate sub-path processing
+      const cleanedPaths = Array.from(new Set(
+        rawFolderPaths
+          .map(p => String(p || '').trim().replace(/^\/+|\/+$/g, ''))
+          .filter(Boolean)
+      )).sort((a, b) => a.split('/').length - b.split('/').length);
+
+      const topLevelPaths = cleanedPaths.filter((p, idx) => {
+        return !cleanedPaths.some((other, oIdx) => oIdx < idx && p.startsWith(other + '/'));
+      });
+
+      let movedCount = 0;
+
+      for (const cleanPath of topLevelPaths) {
+        const pathParts = cleanPath.split('/').filter(Boolean);
+        const folderName = pathParts[pathParts.length - 1];
+
+        // Locate or ensure folder in database
+        let currentParentId = null;
+        let folderId = null;
+        for (const part of pathParts) {
+          const fRes = await client.query(
+            `SELECT id FROM masterfolder_category_folders
+             WHERE category_id = $1 AND LOWER(name) = LOWER($2) AND ${currentParentId ? 'parent_folder_id = $3' : 'parent_folder_id IS NULL'} LIMIT 1`,
+            currentParentId ? [sourceCategoryId, part, currentParentId] : [sourceCategoryId, part]
+          );
+          if (fRes.rows.length === 0) {
+            const insRes = await client.query(
+              `INSERT INTO masterfolder_category_folders (category_id, parent_folder_id, name) VALUES ($1, $2, $3) RETURNING id`,
+              [sourceCategoryId, currentParentId, part]
+            );
+            folderId = insRes.rows[0].id;
+          } else {
+            folderId = fRes.rows[0].id;
+          }
+          currentParentId = folderId;
+        }
+
+        // Cycle check: cannot move folder into itself or any child
+        if (sourceCategoryId === targetCategoryId) {
+          if (normalizedTargetFolder === cleanPath || (normalizedTargetFolder && normalizedTargetFolder.startsWith(cleanPath + '/'))) {
+            throw new Error(`Cannot move folder "${folderName}" into itself or its own subfolder.`);
+          }
+        }
+        if (targetParentFolderId) {
+          let checkId = targetParentFolderId;
+          const visited = new Set();
+          while (checkId) {
+            if (visited.has(checkId)) break;
+            visited.add(checkId);
+            if (checkId === folderId) {
+              throw new Error(`Cannot move folder "${folderName}" into itself or its own subfolder.`);
+            }
+            const pRes = await client.query('SELECT parent_folder_id FROM masterfolder_category_folders WHERE id = $1', [checkId]);
+            if (pRes.rows.length === 0) break;
+            checkId = pRes.rows[0].parent_folder_id;
+          }
+        }
+
+        // Check if moving to exact same spot
+        const curFolderRes = await client.query(
+          `SELECT parent_folder_id FROM masterfolder_category_folders WHERE id = $1`,
+          [folderId]
+        );
+        const curParentId = curFolderRes.rows[0]?.parent_folder_id || null;
+        if (sourceCategoryId === targetCategoryId && curParentId === targetParentFolderId) {
+          // Already in requested destination
+          continue;
+        }
+
+        // Check collision: does another folder with this name exist in destination?
+        const conflictRes = await client.query(
+          `SELECT id FROM masterfolder_category_folders
+           WHERE category_id = $1 AND LOWER(name) = LOWER($2) AND ${targetParentFolderId ? 'parent_folder_id = $3' : 'parent_folder_id IS NULL'} AND id != $4
+           LIMIT 1`,
+          targetParentFolderId ? [targetCategoryId, folderName, targetParentFolderId, folderId] : [targetCategoryId, folderName, folderId]
+        );
+        if (conflictRes.rows.length > 0) {
+          throw new Error(`A folder named "${folderName}" already exists in the destination.`);
+        }
+
+        // Update folder record
+        try {
+          await client.query(
+            `UPDATE masterfolder_category_folders
+             SET category_id = $1, parent_folder_id = $2, updated_at = NOW()
+             WHERE id = $3`,
+            [targetCategoryId, targetParentFolderId, folderId]
+          );
+        } catch (uErr) {
+          if (String(uErr.message || '').includes('updated_at')) {
+            await client.query(
+              `UPDATE masterfolder_category_folders
+               SET category_id = $1, parent_folder_id = $2
+               WHERE id = $3`,
+              [targetCategoryId, targetParentFolderId, folderId]
+            );
+          } else {
+            throw uErr;
+          }
+        }
+
+        // Update all descendant folders to new category if cross-category move
+        if (sourceCategoryId !== targetCategoryId) {
+          await client.query(
+            `WITH RECURSIVE subfolders AS (
+               SELECT id FROM masterfolder_category_folders WHERE parent_folder_id = $1
+               UNION ALL
+               SELECT f.id FROM masterfolder_category_folders f
+               JOIN subfolders s ON f.parent_folder_id = s.id
+             )
+             UPDATE masterfolder_category_folders
+             SET category_id = $2
+             WHERE id IN (SELECT id FROM subfolders)`,
+            [folderId, targetCategoryId]
+          );
+        }
+
+        // Cascade path and category updates to files in vault_files
+        const newFolderPath = normalizedTargetFolder ? `${normalizedTargetFolder}/${folderName}` : folderName;
+
+        const updateFilesRes = await client.query(
+          `UPDATE vault_files
+           SET category = $1,
+               folder = CASE
+                 WHEN folder = $2 THEN $3
+                 ELSE $3 || SUBSTRING(folder, LENGTH($2) + 1)
+               END
+           WHERE category = $4
+             AND (folder = $2 OR folder LIKE $2 || '/%')
+           RETURNING id`,
+          [targetCategory, cleanPath, newFolderPath, sourceCategory]
+        );
+
+        if (updateFilesRes.rows.length > 0) {
+          const fileIds = updateFilesRes.rows.map((r) => r.id);
+          await client.query(
+            `UPDATE vault_file_metadata
+             SET category = $1
+             WHERE file_id = ANY($2::int[]) AND masterfolder_id = $3`,
+            [targetCategory, fileIds, masterfolderId]
+          );
+        }
+
+        await logAction(
+          req.user.id,
+          'MOVE_FOLDER',
+          null,
+          `Moved folder "${cleanPath}" from ${sourceCategory} to ${targetCategory}${normalizedTargetFolder ? '/' + normalizedTargetFolder : ''}`,
+          req.ip
+        );
+
+        movedCount++;
+      }
+
+      await client.query('COMMIT');
+      res.json({ success: true, movedCount, message: `Successfully moved ${movedCount} folder(s).` });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('[API /api/folders/move] Error:', error.message);
+    const isConflict = error.message.includes('already exists') || error.message.includes('its own subfolder');
+    res.status(isConflict ? 409 : 500).json({ error: error.message || 'Failed to move folders' });
+  }
+});
+
 app.post('/api/upload', verifyToken, upload.single('document'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file uploaded" });
   

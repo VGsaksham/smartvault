@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { FileText, Image as ImageIcon, FileArchive, File as FileIcon, Search, CloudUpload, Trash2, Folder, HardDrive, Shield, FolderInput, Copy, Edit2, Tag, Calendar, Download, QrCode, Undo2, Star, CheckSquare, MousePointer2, LayoutGrid, List as ListIcon, MoreVertical, Moon, Sun, Music, Video, Printer, Plus, AlertCircle, UploadCloud } from 'lucide-react';
+import { FileText, Image as ImageIcon, FileArchive, File as FileIcon, Search, CloudUpload, Trash2, Folder, HardDrive, Shield, FolderInput, Copy, Edit2, Tag, Calendar, Download, QrCode, Undo2, Star, CheckSquare, MousePointer2, LayoutGrid, List as ListIcon, MoreVertical, Moon, Sun, Music, Video, Printer, Plus, AlertCircle, UploadCloud, Check, FolderOpen, ChevronRight } from 'lucide-react';
 import axios from 'axios';
 import { QRCodeSVG } from 'qrcode.react';
 import CategoryDashboard from './CategoryDashboard';
@@ -90,6 +90,7 @@ export default function MainDashboard() {
   
   // Bulk Selection State
   const [selectedFileIds, setSelectedFileIds] = useState<number[]>([]);
+  const [selectedFolderPaths, setSelectedFolderPaths] = useState<string[]>([]);
   const [isSelectMode, setIsSelectMode] = useState(false);
   const [isDragSelecting, setIsDragSelecting] = useState(false);
   const [showBulkMoveModal, setShowBulkMoveModal] = useState(false);
@@ -245,6 +246,8 @@ const toggleDarkMode = () => {
 
   useEffect(() => {
     setActiveFolder(folderParam );
+    setSelectedFolderPaths([]);
+    setSelectedFileIds([]);
   }, [folderParam, activeCategory]);
 
 
@@ -1029,6 +1032,20 @@ const toggleDarkMode = () => {
     );
   };
 
+  const toggleFolderSelection = (folderPath: string) => {
+    setSelectedFolderPaths(prev =>
+      prev.includes(folderPath) ? prev.filter(p => p !== folderPath) : [...prev, folderPath]
+    );
+  };
+
+  const openFolder = (folderPath: string) => {
+    const params = new URLSearchParams(searchParams);
+    params.set('folder', folderPath);
+    setActiveFolder(folderPath);
+    setSelectedFolderPaths([]);
+    router.replace(`${pathname}?${params.toString()}`);
+  };
+
   const handleBulkAction = async (action: string, payload: any = {}, undoData?: { action: string, payload: any, fileIds: number[] }, specificIds?: number[]) => {
     setIsBulkProcessing(true);
     const targetIds = specificIds || selectedFileIds;
@@ -1073,23 +1090,104 @@ const toggleDarkMode = () => {
   };
 
   const handleBulkDelete = async () => {
+    const totalFiles = selectedFileIds.length;
+    const totalFolders = selectedFolderPaths.length;
+    const labelParts: string[] = [];
+    if (totalFolders > 0) labelParts.push(`${totalFolders} folder${totalFolders > 1 ? 's' : ''}`);
+    if (totalFiles > 0) labelParts.push(`${totalFiles} file${totalFiles > 1 ? 's' : ''}`);
     const ok = await confirm({
-      title: 'Delete files',
-      message: `Permanently delete ${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''}?`,
+      title: 'Delete selected items',
+      message: `Permanently delete ${labelParts.join(' and ')}?`,
       confirmText: 'Delete',
       destructive: true
     });
     if (!ok) return;
-    handleBulkAction('DELETE');
+
+    if (totalFiles > 0) {
+      await handleBulkAction('DELETE');
+    }
+
+    if (totalFolders > 0) {
+      const token = localStorage.getItem('token');
+      for (const folderPath of selectedFolderPaths) {
+        const fId = folderIdMap[`${activeCategory}::${folderPath}`];
+        if (fId) {
+          try {
+            await fetch(apiUrl(`/api/admin/structure/folders/${fId}`), {
+              method: 'DELETE',
+              headers: { Authorization: `Bearer ${token}` }
+            });
+          } catch (e) {
+            console.error('Failed to delete folder', folderPath, e);
+          }
+        }
+      }
+      setSelectedFolderPaths([]);
+      window.dispatchEvent(new Event('smartvault:structureChanged'));
+    }
   };
 
-  const handleBulkMove = () => {
-    const categoriesMap: Record<number, string> = {};
-    selectedFileIds.forEach(id => {
-      const file = files.find(f => f.id === id);
-      if (file) categoriesMap[id] = file.category;
-    });
-    handleBulkAction('MOVE', { targetCategory: bulkMoveDept, targetFolder: bulkMoveFolder  }, { action: 'MOVE', payload: { categoriesMap }, fileIds: selectedFileIds });
+  const handleBulkMove = async () => {
+    setIsBulkProcessing(true);
+    try {
+      const token = localStorage.getItem('token');
+      let movedFolders = 0;
+      let movedFiles = 0;
+
+      if (selectedFolderPaths.length > 0) {
+        const res = await fetch(apiUrl('/api/folders/move'), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            masterfolderId: Number(masterfolderId),
+            sourceCategory: activeCategory,
+            folderPaths: selectedFolderPaths,
+            targetCategory: bulkMoveDept,
+            targetFolder: bulkMoveFolder || null
+          })
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || 'Failed to move folders');
+        }
+        movedFolders = selectedFolderPaths.length;
+      }
+
+      if (selectedFileIds.length > 0) {
+        const categoriesMap: Record<number, string> = {};
+        selectedFileIds.forEach(id => {
+          const file = files.find(f => f.id === id);
+          if (file) categoriesMap[id] = file.category;
+        });
+        await handleBulkAction('MOVE', { targetCategory: bulkMoveDept, targetFolder: bulkMoveFolder }, { action: 'MOVE', payload: { categoriesMap }, fileIds: selectedFileIds });
+        movedFiles = selectedFileIds.length;
+      }
+
+      setSelectedFolderPaths([]);
+      setSelectedFileIds([]);
+      setShowBulkMoveModal(false);
+
+      window.dispatchEvent(new Event('smartvault:structureChanged'));
+      fetchFiles();
+
+      const successParts: string[] = [];
+      if (movedFolders > 0) successParts.push(`${movedFolders} folder${movedFolders > 1 ? 's' : ''}`);
+      if (movedFiles > 0) successParts.push(`${movedFiles} file${movedFiles > 1 ? 's' : ''}`);
+      if (successParts.length > 0) {
+        setToastMessage({
+          message: `Successfully moved ${successParts.join(' and ')} to ${bulkMoveDept}${bulkMoveFolder ? `/${bulkMoveFolder}` : ''}.`,
+          timestamp: Date.now()
+        });
+      }
+    } catch (err: any) {
+      console.error('Bulk move error:', err);
+      setAlertConfig({ title: 'Move Failed', message: err.message || 'Failed to move items', isError: true });
+    } finally {
+      setIsBulkProcessing(false);
+    }
   };
 
   const handleBulkCopy = () => {
@@ -1665,6 +1763,7 @@ const renderSearchPath = (file: any) => {
                 viewMode === 'grid' ? (
                   <div className="grid grid-cols-1 min-[420px]:grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 md:gap-4 mb-6 md:mb-8">
                     {dynamicFolders.map(folderPath => {
+                      const isFolderSelected = selectedFolderPaths.includes(folderPath);
                       const folderName = folderAliasMap[`${activeCategory}::${folderPath}`]?.split('/').pop() || folderPath.split('/').pop() || folderPath;
                       // Count files at this exact path AND files in any sub-path
                       const folderCount = Array.isArray(files)
@@ -1679,28 +1778,42 @@ const renderSearchPath = (file: any) => {
                       return (
                         <div
                           key={folderPath}
-                          onClick={() => {
-                            const params = new URLSearchParams(searchParams);
-                            params.set('folder', folderPath);
-                            setActiveFolder(folderPath);
-                            router.replace(`${pathname}?${params.toString()}`);
-                          }}
-                          className="group bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[14px] p-4 flex flex-col items-start gap-3 hover:border-[var(--accent)] hover:shadow-[var(--shadow-medium)] transition-all text-left cursor-pointer relative"
+                          onClick={() => toggleFolderSelection(folderPath)}
+                          onDoubleClick={() => openFolder(folderPath)}
+                          className={`group bg-[var(--bg-surface)] border ${
+                            isFolderSelected
+                              ? 'border-[var(--accent)] ring-2 ring-[var(--accent)] bg-[var(--accent-soft)]'
+                              : 'border-[var(--border-subtle)]'
+                          } rounded-[14px] p-4 flex flex-col items-start gap-3 hover:border-[var(--accent)] hover:shadow-[var(--shadow-medium)] transition-all text-left cursor-pointer relative select-none`}
                         >
                           <div className="w-full flex justify-between items-start">
-                            <div className="w-10 h-10 rounded-[10px] bg-[var(--bg-neutral)] flex items-center justify-center group-hover:bg-[var(--bg-elevated)] transition-colors">
-                              <Folder size={20} className="text-black dark:text-zinc-500 opacity-80" />
+                            <div className="flex items-center gap-2">
+                              <div className={`w-5 h-5 rounded-[6px] border flex items-center justify-center transition-colors ${
+                                isFolderSelected ? 'bg-[#007AFF] border-[#007AFF]' : 'border-[rgba(0,0,0,0.18)] bg-white dark:bg-zinc-800'
+                              }`}>
+                                {isFolderSelected && <Check size={12} className="text-white" />}
+                              </div>
+                              <div className="w-9 h-9 rounded-[10px] bg-[var(--bg-neutral)] flex items-center justify-center group-hover:bg-[var(--bg-elevated)] transition-colors">
+                                <Folder size={18} className="text-black dark:text-zinc-500 opacity-80" />
+                              </div>
                             </div>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); toggleFolderStar(folderPath); }}
-                              className="z-10 mt-1 mr-1 flex-shrink-0"
-                            >
-                              <Star
-                                size={18}
-                                className={`transition-all duration-200 hover:scale-110 active:scale-[1.4] ${starredFolderPaths.has(`${activeCategory}::${folderPath}`) ? 'text-[#ffcc00] fill-[#ffcc00] star-anim-active' : 'text-[rgba(0,0,0,0.15)] hover:text-[#ffcc00] hover:fill-[#ffcc00] opacity-0 group-hover:opacity-100'}`}
-                              />
-                            </button>
                             <div className="flex items-center gap-1">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); openFolder(folderPath); }}
+                                className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--accent)] hover:bg-[var(--bg-neutral)] transition-colors"
+                                title="Open Folder (or double-click)"
+                              >
+                                <FolderOpen size={16} />
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); toggleFolderStar(folderPath); }}
+                                className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:bg-[var(--bg-neutral)] transition-colors"
+                              >
+                                <Star
+                                  size={16}
+                                  className={`transition-all duration-200 hover:scale-110 active:scale-[1.4] ${starredFolderPaths.has(`${activeCategory}::${folderPath}`) ? 'text-[#ffcc00] fill-[#ffcc00] star-anim-active' : 'text-[rgba(0,0,0,0.15)] hover:text-[#ffcc00] hover:fill-[#ffcc00] opacity-0 group-hover:opacity-100'}`}
+                                />
+                              </button>
                               {(canDownloadFolders || userRole === 'Admin') && (
                                 <button
                                   onClick={(e) => {
@@ -1747,36 +1860,46 @@ const renderSearchPath = (file: any) => {
                       <div className="w-10"></div>
                       <div className="flex-1 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Folder Name</div>
                       <div className="w-32 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden sm:block">Items</div>
-                      <div className="w-12 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden md:block text-right pr-4">QR</div>
+                      <div className="w-24 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden md:block text-right pr-4">Actions</div>
                     </div>
                     {dynamicFolders.map(folderPath => {
+                      const isFolderSelected = selectedFolderPaths.includes(folderPath);
                       const folderName = folderAliasMap[`${activeCategory}::${folderPath}`]?.split('/').pop() || folderPath.split('/').pop() || folderPath;
                       const folderCount = Array.isArray(files) ? files.filter(f => f.category === activeCategory && (f.folder === folderPath || String(f.folder || '').startsWith(folderPath + '/'))).length : 0;
                       const directFileCount = Array.isArray(files) ? files.filter(f => f.category === activeCategory && f.folder === folderPath).length : 0;
                       return (
                         <div
                           key={folderPath}
-                          onClick={() => {
-                            const params = new URLSearchParams(searchParams);
-                            params.set('folder', folderPath);
-                            setActiveFolder(folderPath);
-                            router.replace(`${pathname}?${params.toString()}`);
-                          }}
-                          className="flex items-center px-4 md:px-6 py-4 hover:bg-[var(--bg-neutral)] transition-colors border-b border-[rgba(0,0,0,0.04)] last:border-0 cursor-pointer"
+                          onClick={() => toggleFolderSelection(folderPath)}
+                          onDoubleClick={() => openFolder(folderPath)}
+                          className={`flex items-center px-4 md:px-6 py-4 hover:bg-[var(--bg-neutral)] transition-colors border-b border-[rgba(0,0,0,0.04)] last:border-0 cursor-pointer select-none ${
+                            isFolderSelected ? 'bg-[var(--accent-soft)]' : ''
+                          }`}
                         >
                           <div className="w-10 flex items-center">
-                            <div className="w-8 h-8 rounded-[8px] bg-[var(--bg-neutral)] flex items-center justify-center">
-                              <Folder size={16} className="text-[var(--text-secondary)]" />
+                            <div className={`w-5 h-5 rounded-[6px] border flex items-center justify-center transition-colors ${
+                              isFolderSelected ? 'bg-[#007AFF] border-[#007AFF]' : 'border-[rgba(0,0,0,0.15)] bg-white'
+                            }`}>
+                              {isFolderSelected && <Check size={12} className="text-white" />}
                             </div>
                           </div>
                           <div className="flex-1 flex items-center gap-3 min-w-0">
+                            <div className="w-8 h-8 rounded-[8px] bg-[var(--bg-neutral)] flex items-center justify-center shrink-0">
+                              <Folder size={16} className="text-[var(--text-secondary)]" />
+                            </div>
                             <span className="text-[14px] font-semibold text-[var(--text-primary)] truncate">{folderName}</span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); openFolder(folderPath); }}
+                              className="text-[11px] font-medium text-[var(--accent)] hover:underline flex items-center gap-0.5 ml-1 shrink-0"
+                            >
+                              Open <ChevronRight size={12} />
+                            </button>
                           </div>
                           <div className="w-32 hidden sm:flex text-[13px] text-[var(--text-secondary)]">
                             {directFileCount} file{directFileCount !== 1 ? 's' : ''}
                             {folderCount > directFileCount && ` (${folderCount - directFileCount} sub)`}
                           </div>
-                          <div className="w-20 hidden md:flex text-[13px] text-[var(--text-secondary)] justify-end pr-4 gap-1">
+                          <div className="w-24 hidden md:flex text-[13px] text-[var(--text-secondary)] justify-end pr-4 gap-1">
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -2541,16 +2664,26 @@ const renderSearchPath = (file: any) => {
         </div>
       )}
       {/* Floating Bulk Action Bar */}
-      {selectedFileIds.length > 0 && (
+      {(selectedFileIds.length > 0 || selectedFolderPaths.length > 0) && (
         <div className="fixed bottom-3 sm:bottom-8 left-1/2 -translate-x-1/2 z-[55] animate-in slide-in-from-bottom-8 fade-in duration-300 w-[calc(100vw-1rem)] sm:w-max sm:max-w-[90vw]">
           <div className="bg-[var(--bg-surface)]/95 backdrop-blur-xl border border-[var(--border-default)] shadow-[0_8px_30px_rgba(0,0,0,0.22)] rounded-[18px] sm:rounded-[980px] px-3 sm:px-6 py-3 flex items-center gap-3 md:gap-6 overflow-x-auto hide-scrollbar">
             <span className="text-[14px] font-medium tracking-[-0.12px] text-[var(--text-primary)] whitespace-nowrap shrink-0">
-              {selectedFileIds.length} item{selectedFileIds.length > 1 ? 's' : ''} selected
+              {selectedFolderPaths.length > 0 && selectedFileIds.length > 0
+                ? `${selectedFolderPaths.length} folder${selectedFolderPaths.length > 1 ? 's' : ''}, ${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''} selected`
+                : selectedFolderPaths.length > 0
+                ? `${selectedFolderPaths.length} folder${selectedFolderPaths.length > 1 ? 's' : ''} selected`
+                : `${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''} selected`}
             </span>
             <div className="w-[1px] h-4 bg-[var(--border-default)] shrink-0"></div>
             
             <div className="flex gap-1.5 shrink-0">
-              <button onClick={() => setSelectedFileIds(filteredFiles.map((f: any) => f.id))} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
+              <button
+                onClick={() => {
+                  setSelectedFileIds(filteredFiles.map((f: any) => f.id));
+                  setSelectedFolderPaths(dynamicFolders);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors"
+              >
                 <CheckSquare size={15} /> Select All
               </button>
               {canBulkMove && (
@@ -2558,25 +2691,32 @@ const renderSearchPath = (file: any) => {
                   <FolderInput size={15} /> Move
                 </button>
               )}
-              <button onClick={() => setShowRenameModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
-                <Edit2 size={15} /> Rename
-              </button>
-              <button onClick={() => { setBulkCopyDept(activeCategory !== 'All files' ? activeCategory : ''); setBulkCopyFolder(''); setShowBulkCopyModal(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
-                <Copy size={15} /> Copy to...</button>
-              <button onClick={() => setShowTagModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
-                <Tag size={15} /> Tag
-              </button>
-              {userRole !== 'Guest' && (
+              {selectedFolderPaths.length === 0 && (
+                <>
+                  <button onClick={() => setShowRenameModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
+                    <Edit2 size={15} /> Rename
+                  </button>
+                  <button onClick={() => { setBulkCopyDept(activeCategory !== 'All files' ? activeCategory : ''); setBulkCopyFolder(''); setShowBulkCopyModal(true); }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
+                    <Copy size={15} /> Copy to...
+                  </button>
+                  <button onClick={() => setShowTagModal(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
+                    <Tag size={15} /> Tag
+                  </button>
+                </>
+              )}
+              {userRole !== 'Guest' && selectedFileIds.length > 0 && selectedFolderPaths.length === 0 && (
                 <button onClick={handleBulkDownload} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
                   <Download size={15} /> ZIP
                 </button>
               )}
-              <button onClick={() => {
-                const selected = Array.isArray(files) ? files.filter(f => selectedFileIds.includes(f.id)) : [];
-                setBulkQrFiles(selected);
-              }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
-                <QrCode size={15} /> QR
-              </button>
+              {selectedFolderPaths.length === 0 && (
+                <button onClick={() => {
+                  const selected = Array.isArray(files) ? files.filter(f => selectedFileIds.includes(f.id)) : [];
+                  setBulkQrFiles(selected);
+                }} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[var(--text-primary)] hover:bg-[var(--bg-neutral)] transition-colors">
+                  <QrCode size={15} /> QR
+                </button>
+              )}
               {userRole === 'Admin' && (
                 <button onClick={handleBulkDelete} className="flex items-center gap-1.5 px-3 py-1.5 rounded-[8px] text-[13px] font-medium text-[#ff5b52] hover:bg-[#ff3b3015] transition-colors ml-1 border border-transparent hover:border-[#ff5b52]">
                   <Trash2 size={15} /> Delete
@@ -2584,7 +2724,7 @@ const renderSearchPath = (file: any) => {
               )}
             </div>
 
-            <button onClick={() => setSelectedFileIds([])} className="ml-2 w-7 h-7 shrink-0 flex items-center justify-center rounded-full bg-[var(--bg-neutral)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-colors">
+            <button onClick={() => { setSelectedFileIds([]); setSelectedFolderPaths([]); }} className="ml-2 w-7 h-7 shrink-0 flex items-center justify-center rounded-full bg-[var(--bg-neutral)] hover:bg-[var(--bg-elevated)] text-[var(--text-secondary)] transition-colors">
               ✕
             </button>
           </div>
@@ -2595,7 +2735,13 @@ const renderSearchPath = (file: any) => {
       {showBulkMoveModal && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-[rgba(0,0,0,0.4)] backdrop-blur-sm p-4 animate-in fade-in duration-200">
           <div className="bg-[#ffffff] rounded-[20px] sm:rounded-[24px] shadow-[rgba(0,0,0,0.22)_0px_20px_40px] w-full max-w-sm max-h-[calc(100dvh-2rem)] overflow-y-auto p-5 sm:p-8 relative flex flex-col animate-in zoom-in-95 duration-200">
-            <h3 className="text-[20px] font-semibold tracking-[-0.374px] text-[#1d1d1f] mb-1">Move {selectedFileIds.length} file{selectedFileIds.length > 1 ? 's' : ''}</h3>
+            <h3 className="text-[20px] font-semibold tracking-[-0.374px] text-[#1d1d1f] mb-1">
+              {selectedFolderPaths.length > 0 && selectedFileIds.length > 0
+                ? `Move ${selectedFolderPaths.length} folder${selectedFolderPaths.length > 1 ? 's' : ''} & ${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''}`
+                : selectedFolderPaths.length > 0
+                ? `Move ${selectedFolderPaths.length} folder${selectedFolderPaths.length > 1 ? 's' : ''}`
+                : `Move ${selectedFileIds.length} file${selectedFileIds.length > 1 ? 's' : ''}`}
+            </h3>
             <p className="text-[14px] text-[rgba(0,0,0,0.48)] mb-5">Select destination category and folder.</p>
             
             <label className="text-[12px] font-semibold text-[rgba(0,0,0,0.48)] uppercase tracking-[0.05em] mb-2 block">Category</label>
@@ -2616,9 +2762,19 @@ const renderSearchPath = (file: any) => {
                 <label className="text-[12px] font-semibold text-[rgba(0,0,0,0.48)] uppercase tracking-[0.05em] mb-2 block">Folder <span className="normal-case font-normal">(optional)</span></label>
                 <div className="flex flex-wrap gap-2 mb-5">
                   <button onClick={() => setBulkMoveFolder('')} className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium transition-colors ${bulkMoveFolder === '' ? 'bg-[#007AFF] text-white' : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed]'}`}>No folder</button>
-                  {Array.from(new Set([...(deptFoldersMap[bulkMoveDept] || []), ...dynamicFolders])).filter(Boolean).map(f => (
-                    <button key={f} onClick={() => setBulkMoveFolder(f)} className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium transition-colors ${bulkMoveFolder === f ? 'bg-[#007AFF] text-white' : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed]'}`}>{f}</button>
-                  ))}
+                  {Array.from(new Set([...(deptFoldersMap[bulkMoveDept] || []), ...dynamicFolders]))
+                    .filter(Boolean)
+                    .filter(f => {
+                      if (bulkMoveDept === activeCategory) {
+                        for (const sp of selectedFolderPaths) {
+                          if (f === sp || f.startsWith(sp + '/')) return false;
+                        }
+                      }
+                      return true;
+                    })
+                    .map(f => (
+                      <button key={f} onClick={() => setBulkMoveFolder(f)} className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium transition-colors ${bulkMoveFolder === f ? 'bg-[#007AFF] text-white' : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed]'}`}>{f}</button>
+                    ))}
                 </div>
               </>
             )}

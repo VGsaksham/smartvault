@@ -1,16 +1,16 @@
-# Graph Report - smartvault  (2026-07-31)
+# Graph Report - smartvault  (2026-10-11)
 
 ## Corpus Check
-- 162 files · ~90,226 words
+- 181 files · ~94,562 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 856 nodes · 994 edges · 119 communities (49 shown, 70 thin omitted)
+- 912 nodes · 1039 edges · 142 communities (63 shown, 79 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 24 edges (avg confidence: 0.5)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `50ef86be`
+- Built from commit: `8f869ab4`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -129,6 +129,25 @@
 - getCurrentFY
 - parseStoragePathMap
 - test_patch.js
+- env.js
+- wipe.js
+- test_files.js
+- check_copy.js
+- check_user_parse.js
+- find_search.js
+- get_token.js
+- test-folders.js
+- test_sort.js
+- test-struct.js
+- test_cte.js
+- view_put.js
+- debug_search.js
+- test_api.js
+- test_update.js
+- debug_minio.js
+- buildFileAccessCondition
+- test_query6.js
+- test_query7.js
 
 ## God Nodes (most connected - your core abstractions)
 1. `apiUrl()` - 38 edges
@@ -157,26 +176,26 @@
 ## Import Cycles
 - None detected.
 
-## Communities (119 total, 70 thin omitted)
+## Communities (142 total, 79 thin omitted)
 
 ### Community 0 - "Community 0"
 Cohesion: 0.08
-Nodes (42): backupTracker, env, express, fs, {
-  listBackups,
-  createBackupSnapshot,
-  getBackupPreview,
-  restoreBackup,
-  getLatestBackup,
+Nodes (42): backupTracker, env, express, fs, {
+  listBackups,
+  createBackupSnapshot,
+  getBackupPreview,
+  restoreBackup,
+  getLatestBackup,
 }, { logAction }, parseStoragePathMap(), pool (+34 more)
 
 ### Community 1 - "Community 1"
 Cohesion: 0.05
-Nodes (29): adminRoutes, app, archiver, auditRoutes, authRoutes, bcrypt, {
-  checkFilePermission,
-  canAccessCategory,
-  getEffectiveUserSettings,
-  hydrateRequestUser,
-}, cors (+21 more)
+Nodes (28): adminRoutes, app, archiver, auditRoutes, authRoutes, bcrypt, {
+  checkFilePermission,
+  canAccessCategory,
+  getEffectiveUserSettings,
+  hydrateRequestUser,
+}, cors (+20 more)
 
 ### Community 2 - "Community 2"
 Cohesion: 0.05
@@ -215,16 +234,16 @@ Cohesion: 0.15
 Nodes (13): AdminBackupsPage(), BackupConfig, BackupItem, fmtBytes(), PreviewResponse, Masterfolder, MasterfoldersAdminPage(), AuditLog (+5 more)
 
 ### Community 10 - "Community 10"
-Cohesion: 0.07
-Nodes (29): assertWritableDir(), checkDbSnapshot(), checkMinio(), env, fail(), fs, main(), Minio (+21 more)
+Cohesion: 0.24
+Nodes (13): assertWritableDir(), checkDbSnapshot(), checkMinio(), env, fail(), fs, main(), Minio (+5 more)
 
 ### Community 11 - "Community 11"
 Cohesion: 0.19
 Nodes (6): FileGrid(), FileGridProps, formatBytes(), getFileIcon(), RecentView(), StarredView()
 
 ### Community 12 - "Community 12"
-Cohesion: 0.11
-Nodes (7): pool, pool, pool, env, { Pool }, pool, pool
+Cohesion: 0.10
+Nodes (8): pool, pool, pool, pool, pool, env, { Pool }, pool
 
 ### Community 13 - "Community 13"
 Cohesion: 0.20
@@ -353,25 +372,65 @@ Nodes (3): content, fs, sideContent
 Cohesion: 0.50
 Nodes (3): content, fs, mainContent
 
+### Community 49 - "Community 49"
+Cohesion: 0.40
+Nodes (3): { execSync }, fs, path
+
+### Community 119 - "env.js"
+Cohesion: 0.25
+Nodes (5): dotenv, env, path, env, { Pool }
+
+### Community 120 - "wipe.js"
+Cohesion: 0.33
+Nodes (4): env, Minio, minioClient, pool
+
+### Community 121 - "test_files.js"
+Cohesion: 0.40
+Nodes (3): jwt, { JWT_SECRET }, pool
+
+### Community 122 - "check_copy.js"
+Cohesion: 0.50
+Nodes (3): fs, lines, reqIdx
+
+### Community 123 - "check_user_parse.js"
+Cohesion: 0.50
+Nodes (3): fs, lines, reqIdx
+
+### Community 125 - "get_token.js"
+Cohesion: 0.50
+Nodes (3): env, jwt, token
+
+### Community 126 - "test-folders.js"
+Cohesion: 0.50
+Nodes (3): env, jwt, pool
+
+### Community 128 - "test-struct.js"
+Cohesion: 0.50
+Nodes (3): env, jwt, pool
+
+### Community 130 - "view_put.js"
+Cohesion: 0.50
+Nodes (3): fs, lines, reqIdx
+
 ## Knowledge Gaps
-- **446 isolated node(s):** `pool`, `{ getUsermasterfolderAccess }`, `{ Pool }`, `eslintConfig`, `fs` (+441 more)
+- **474 isolated node(s):** `pool`, `{ getUsermasterfolderAccess }`, `pool`, `fs`, `lines` (+469 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **70 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **79 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `apiUrl()` connect `Community 5` to `Community 7`, `Community 9`, `Community 11`, `Community 15`, `Community 19`, `Community 22`, `Community 29`?**
-  _High betweenness centrality (0.008) - this node is a cross-community bridge._
+  _High betweenness centrality (0.007) - this node is a cross-community bridge._
 - **Why does `createBackupSnapshot()` connect `Community 0` to `Community 16`, `Community 1`?**
   _High betweenness centrality (0.002) - this node is a cross-community bridge._
 - **Why does `dependencies` connect `Community 4` to `Community 6`?**
   _High betweenness centrality (0.002) - this node is a cross-community bridge._
-- **What connects `pool`, `{ getUsermasterfolderAccess }`, `{ Pool }` to the rest of the system?**
-  _446 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **What connects `pool`, `{ getUsermasterfolderAccess }`, `pool` to the rest of the system?**
+  _474 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `Community 0` be split into smaller, more focused modules?**
   _Cohesion score 0.07890070921985816 - nodes in this community are weakly interconnected._
 - **Should `Community 1` be split into smaller, more focused modules?**
-  _Cohesion score 0.046511627906976744 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.047619047619047616 - nodes in this community are weakly interconnected._
 - **Should `Community 2` be split into smaller, more focused modules?**
   _Cohesion score 0.05405405405405406 - nodes in this community are weakly interconnected._
