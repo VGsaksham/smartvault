@@ -138,6 +138,23 @@ if (!corsOriginsRaw || corsOriginsRaw === '*') {
 }
 app.use(express.json());
 
+// Prevent browsers and proxies from caching any API responses
+const API_BOOT_TIMESTAMP = Date.now();
+app.use((req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  res.set('Surrogate-Control', 'no-store');
+  next();
+});
+
+app.get('/api/version', (req, res) => {
+  res.json({
+    version: '1.0.0',
+    bootedAt: API_BOOT_TIMESTAMP,
+  });
+});
+
 const minioClient = new Minio.Client(env.MINIO);
 
 const upload = multer({ storage: multer.memoryStorage() });

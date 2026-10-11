@@ -20368,7 +20368,7 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "src/components/TopBar.tsx",
-      "source_location": "L64",
+      "source_location": "L113",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_components_topbar_topbar",
@@ -20393,7 +20393,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/components/TopBar.tsx",
-      "source_location": "L89",
+      "source_location": "L138",
       "weight": 1.0,
       "_origin": "ast",
       "source": "src_components_topbar_topbar",
@@ -21999,5 +21999,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "19a8d0c335e92ba586b8f4c65ea2f12404d9091a"
+  "built_at_commit": "0d574f9634973cb32da675e4e28c82cdf47363e4"
 }

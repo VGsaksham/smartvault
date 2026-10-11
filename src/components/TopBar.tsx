@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useRouter, usePathname, useSearchParams } from 'next/navigation';
-import { Search, User, Menu, X, Calendar, Folder, FileText, Pin } from 'lucide-react';
+import { Search, User, Menu, X, Calendar, Folder, FileText, Pin, RefreshCw } from 'lucide-react';
 import { apiUrl } from '@/lib/api';
 import { useSidebar } from '@/context/SidebarContext';
 
@@ -304,6 +304,17 @@ export default function TopBar() {
     router.push(target);
   };
 
+  const handleClearCacheAndReload = async () => {
+    setIsUserMenuOpen(false);
+    try {
+      if ('caches' in window) {
+        const names = await caches.keys();
+        await Promise.all(names.map((name) => caches.delete(name)));
+      }
+    } catch {}
+    window.location.href = window.location.pathname + '?_bust=' + Date.now();
+  };
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
@@ -556,6 +567,14 @@ export default function TopBar() {
                 {currentUser?.role === 'Admin' && (
                   <button onClick={() => goTo('/admin/masterfolders')} className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] transition-colors">Masterfolders</button>
                 )}
+                <button
+                  onClick={handleClearCacheAndReload}
+                  className="w-full text-left px-4 py-2.5 text-[13px] text-[var(--text-secondary)] hover:bg-[var(--bg-neutral)] flex items-center justify-between transition-colors cursor-pointer"
+                  title="Clear all browser caches and reload the latest version"
+                >
+                  <span>Reload & Clear Cache</span>
+                  <RefreshCw size={13} className="text-[var(--text-tertiary)]" />
+                </button>
                 <div className="h-[1px] bg-[var(--border-subtle)]" />
                 <button onClick={handleLogout} className="w-full text-left px-4 py-2.5 text-[13px] text-[#ff5b52] hover:bg-[#ff5b5210] transition-colors">Sign Out</button>
               </div>
