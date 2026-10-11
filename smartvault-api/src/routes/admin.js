@@ -70,10 +70,18 @@ async function ensuremasterfolderStructureSchema(db = pool) {
     );
   `).catch(() => {});
 
-  // Add parent_folder_id column if it doesn't exist (migration for existing installs)
+  await db.query(`
+    ALTER TABLE masterfolder_categories
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
+  `).catch(() => {});
+
+  // Add parent_folder_id, created_at, updated_at columns if they don't exist (migration for existing installs)
   await db.query(`
     ALTER TABLE masterfolder_category_folders
-    ADD COLUMN IF NOT EXISTS parent_folder_id INTEGER REFERENCES masterfolder_category_folders(id) ON DELETE CASCADE;
+    ADD COLUMN IF NOT EXISTS parent_folder_id INTEGER REFERENCES masterfolder_category_folders(id) ON DELETE CASCADE,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT NOW(),
+    ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT NOW();
   `).catch(() => {});
   await db.query(`CREATE INDEX IF NOT EXISTS idx_masterfolder_category_folders_dept ON masterfolder_category_folders(category_id);`);
   await db.query(`CREATE INDEX IF NOT EXISTS idx_masterfolder_category_folders_parent ON masterfolder_category_folders(parent_folder_id);`);
@@ -223,10 +231,21 @@ router.put('/structure/categories/:id', verifyToken, async (req, res) => {
     const category = deptRes.rows[0];
     const oldName = category.name;
 
-    await client.query(
-      `UPDATE masterfolder_categories SET name = $1, updated_at = NOW() WHERE id = $2`,
-      [name, categoryId]
-    );
+    try {
+      await client.query(
+        `UPDATE masterfolder_categories SET name = $1, updated_at = NOW() WHERE id = $2`,
+        [name, categoryId]
+      );
+    } catch (updateErr) {
+      if (String(updateErr.message || '').includes('updated_at')) {
+        await client.query(
+          `UPDATE masterfolder_categories SET name = $1 WHERE id = $2`,
+          [name, categoryId]
+        );
+      } else {
+        throw updateErr;
+      }
+    }
 
     // Propagate rename to existing files (category stored as text).
     await client.query(
@@ -370,10 +389,21 @@ router.put('/structure/folders/:id', verifyToken, async (req, res) => {
     // Compute old full path before rename
     const oldFullPath = await getFolderFullPath(client, folderId);
 
-    await client.query(
-      `UPDATE masterfolder_category_folders SET name = $1, updated_at = NOW() WHERE id = $2`,
-      [name, folderId]
-    );
+    try {
+      await client.query(
+        `UPDATE masterfolder_category_folders SET name = $1, updated_at = NOW() WHERE id = $2`,
+        [name, folderId]
+      );
+    } catch (updateErr) {
+      if (String(updateErr.message || '').includes('updated_at')) {
+        await client.query(
+          `UPDATE masterfolder_category_folders SET name = $1 WHERE id = $2`,
+          [name, folderId]
+        );
+      } else {
+        throw updateErr;
+      }
+    }
 
     // Compute new full path after rename
     const newFullPath = await getFolderFullPath(client, folderId);
