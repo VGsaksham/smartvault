@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { useSearchParams, useRouter, usePathname } from 'next/navigation';
-import { FileText, Image as ImageIcon, FileArchive, File as FileIcon, Search, CloudUpload, Trash2, Folder, HardDrive, Shield, FolderInput, Copy, Edit2, Tag, Calendar, Download, QrCode, Undo2, Star, CheckSquare, MousePointer2, LayoutGrid, List as ListIcon, MoreVertical, Moon, Sun, Music, Video, Printer, Plus, AlertCircle, UploadCloud, Check, FolderOpen, ChevronRight } from 'lucide-react';
+import { FileText, Image as ImageIcon, FileArchive, File as FileIcon, Search, CloudUpload, Trash2, Folder, HardDrive, Shield, FolderInput, Copy, Edit2, Tag, Calendar, Download, QrCode, Undo2, Star, CheckSquare, MousePointer2, LayoutGrid, List as ListIcon, MoreVertical, Moon, Sun, Music, Video, Printer, Plus, AlertCircle, UploadCloud, Check, FolderOpen, ChevronRight, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import axios from 'axios';
 import { QRCodeSVG } from 'qrcode.react';
 import CategoryDashboard from './CategoryDashboard';
@@ -10,6 +10,8 @@ import { apiUrl } from '@/lib/api';
 import { useConfirm } from '@/components/ConfirmProvider';
 import { CustomSelect } from '@/components/ui/Select';
 
+type SortField = 'name' | 'date' | 'size' | 'type';
+type SortDirection = 'asc' | 'desc';
 type StructureCategory = { name: string; folders: { id: number; name: string; parent_folder_id: number | null }[] };
 type UploadQueueItem = { id: string; file: File; targetFolder?: string; proposedName: string; proposedFolder?: string };
 
@@ -132,6 +134,76 @@ export default function MainDashboard() {
 
   const [isDarkMode, setIsDarkMode] = useState(false);
   
+  // Sorting State
+  const [sortField, setSortField] = useState<SortField>('date');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [isSortOpen, setIsSortOpen] = useState(false);
+  const sortDropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const savedField = localStorage.getItem('smartvault-sort-field') as SortField | null;
+    const savedDir = localStorage.getItem('smartvault-sort-direction') as SortDirection | null;
+    if (savedField && ['name', 'date', 'size', 'type'].includes(savedField)) {
+      setSortField(savedField);
+    }
+    if (savedDir && ['asc', 'desc'].includes(savedDir)) {
+      setSortDirection(savedDir);
+    }
+  }, []);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (sortDropdownRef.current && !sortDropdownRef.current.contains(e.target as Node)) {
+        setIsSortOpen(false);
+      }
+    };
+    if (isSortOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSortOpen]);
+
+  const updateSort = (field: SortField, dir?: SortDirection) => {
+    let nextDir = dir;
+    if (!nextDir) {
+      if (field === sortField) {
+        nextDir = sortDirection === 'asc' ? 'desc' : 'asc';
+      } else {
+        nextDir = (field === 'date' || field === 'size') ? 'desc' : 'asc';
+      }
+    }
+    setSortField(field);
+    setSortDirection(nextDir);
+    localStorage.setItem('smartvault-sort-field', field);
+    localStorage.setItem('smartvault-sort-direction', nextDir);
+  };
+
+  const getSortLabel = () => {
+    switch (sortField) {
+      case 'name':
+        return sortDirection === 'asc' ? 'Name (A to Z)' : 'Name (Z to A)';
+      case 'date':
+        return sortDirection === 'desc' ? 'Date (Newest first)' : 'Date (Oldest first)';
+      case 'size':
+        return sortDirection === 'desc' ? 'Size (Largest first)' : 'Size (Smallest first)';
+      case 'type':
+        return sortDirection === 'asc' ? 'Format (A to Z)' : 'Format (Z to A)';
+      default:
+        return 'Sort files';
+    }
+  };
+
+  const getSortShortName = () => {
+    switch (sortField) {
+      case 'name': return 'Name';
+      case 'date': return 'Date';
+      case 'size': return 'Size';
+      case 'type': return 'Format';
+      default: return 'Sort';
+    }
+  };
 
 
   const goToSearchLocation = (file: any, segment: 'company' | 'fy' | 'category' | 'folder' | 'open') => {
@@ -222,27 +294,64 @@ const toggleDarkMode = () => {
   
   const [activeFolder, setActiveFolder] = useState<string | null>(folderParam );
 
-  const filteredFiles = Array.isArray(files) ? files.filter((file) => {
-    const matchesSearch = (file.original_name || '').toLowerCase().includes(searchQuery.toLowerCase());
-    let matchesType = true;
-    const mime = (file.mime_type || '').toLowerCase();
-    if (activeFilter === 'Images') matchesType = mime.includes('image');
-    else if (activeFilter === 'Documents') matchesType = mime.includes('pdf') || mime.includes('document') || mime.includes('text') || mime.includes('sheet') || mime.includes('word');
-    else if (activeFilter === 'Videos') matchesType = mime.includes('video');
-    const matchesDept = activeCategory === 'All files' || file.category === activeCategory;
-    let matchesFolder = true;
-    const isValidFolder = (f: string) => f && f !== 'null' && f !== 'undefined' && f !== '';
-    
-    if (activeCategory !== 'All files') {
-      if (activeFolder) {
-        matchesFolder = file.folder === activeFolder;
-      } else {
-        // Show files that have NO folder
-        matchesFolder = !isValidFolder(file.folder);
+  const filteredFiles = useMemo(() => {
+    if (!Array.isArray(files)) return [];
+    const list = files.filter((file) => {
+      const matchesSearch = (file.original_name || '').toLowerCase().includes(searchQuery.toLowerCase());
+      let matchesType = true;
+      const mime = (file.mime_type || '').toLowerCase();
+      if (activeFilter === 'Images') matchesType = mime.includes('image');
+      else if (activeFilter === 'Documents') matchesType = mime.includes('pdf') || mime.includes('document') || mime.includes('text') || mime.includes('sheet') || mime.includes('word');
+      else if (activeFilter === 'Videos') matchesType = mime.includes('video');
+      const matchesDept = activeCategory === 'All files' || file.category === activeCategory;
+      let matchesFolder = true;
+      const isValidFolder = (f: string) => f && f !== 'null' && f !== 'undefined' && f !== '';
+      
+      if (activeCategory !== 'All files') {
+        if (activeFolder) {
+          matchesFolder = file.folder === activeFolder;
+        } else {
+          // Show files that have NO folder
+          matchesFolder = !isValidFolder(file.folder);
+        }
       }
-    }
-    return matchesSearch && matchesType && matchesDept && matchesFolder;
-  }) : [];
+      return matchesSearch && matchesType && matchesDept && matchesFolder;
+    });
+
+    return [...list].sort((a, b) => {
+      if (sortField === 'name') {
+        const nameA = (a.user_alias || a.custom_name || a.original_name || '').toLowerCase();
+        const nameB = (b.user_alias || b.custom_name || b.original_name || '').toLowerCase();
+        return sortDirection === 'asc' ? nameA.localeCompare(nameB) : nameB.localeCompare(nameA);
+      }
+      if (sortField === 'date') {
+        const dateA = a.upload_date ? new Date(a.upload_date).getTime() : 0;
+        const dateB = b.upload_date ? new Date(b.upload_date).getTime() : 0;
+        return sortDirection === 'asc' ? dateA - dateB : dateB - dateA;
+      }
+      if (sortField === 'size') {
+        const sizeA = Number(a.size_bytes) || 0;
+        const sizeB = Number(b.size_bytes) || 0;
+        return sortDirection === 'asc' ? sizeA - sizeB : sizeB - sizeA;
+      }
+      if (sortField === 'type') {
+        const getExt = (f: any) => {
+          const name = f.original_name || '';
+          const dot = name.lastIndexOf('.');
+          return dot > 0 ? name.slice(dot + 1).toLowerCase() : (f.mime_type || '').split('/').pop()?.toLowerCase() || '';
+        };
+        const extA = getExt(a);
+        const extB = getExt(b);
+        if (extA !== extB) {
+          return sortDirection === 'asc' ? extA.localeCompare(extB) : extB.localeCompare(extA);
+        }
+        const nameA = (a.user_alias || a.custom_name || a.original_name || '').toLowerCase();
+        const nameB = (b.user_alias || b.custom_name || b.original_name || '').toLowerCase();
+        return nameA.localeCompare(nameB);
+      }
+      return 0;
+    });
+  }, [files, searchQuery, activeFilter, activeCategory, activeFolder, sortField, sortDirection]);
 
   useEffect(() => {
     setActiveFolder(folderParam );
@@ -1465,15 +1574,21 @@ const toggleDarkMode = () => {
     }
     if (!activeFolder) {
       // At root: show only top-level folders (no '/' in path)
-      return Array.from(allPaths).filter(p => !p.includes('/')).sort((a, b) => a.localeCompare(b));
+      return Array.from(allPaths).filter(p => !p.includes('/')).sort((a, b) => {
+        if (sortField === 'name' && sortDirection === 'desc') return b.localeCompare(a);
+        return a.localeCompare(b);
+      });
     } else {
       // Inside a folder: show only direct children (prefix matches and exactly one more segment)
       const prefix = activeFolder + '/';
       return Array.from(allPaths)
         .filter(p => p.startsWith(prefix) && !p.slice(prefix.length).includes('/'))
-        .sort((a, b) => a.localeCompare(b));
+        .sort((a, b) => {
+          if (sortField === 'name' && sortDirection === 'desc') return b.localeCompare(a);
+          return a.localeCompare(b);
+        });
     }
-  }, [files, activeCategory, activeFolder, deptFoldersMap]);
+  }, [files, activeCategory, activeFolder, deptFoldersMap, sortField, sortDirection]);
 
   const getCategoryAvailableFolders = (catName: string) => {
     if (!catName || catName === 'All files') return [];
@@ -1678,6 +1793,89 @@ const renderSearchPath = (file: any) => {
             </h1>
 
             <div className="flex items-center gap-2">
+
+              {/* Sort Menu Button (on the left to the light/dark theme button) */}
+              <div className="relative" ref={sortDropdownRef}>
+                <button 
+                  onClick={() => setIsSortOpen(!isSortOpen)}
+                  className={`flex items-center gap-1.5 p-2 sm:px-3 sm:py-2 rounded-[12px] transition-all border ${
+                    isSortOpen 
+                      ? 'bg-[var(--bg-elevated)] border-[var(--accent)] text-[var(--accent)] shadow-sm' 
+                      : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)] border-[var(--border-subtle)]'
+                  }`}
+                  title={getSortLabel()}
+                >
+                  <ArrowUpDown size={18} />
+                  <span className="text-[13px] font-medium hidden md:inline">
+                    {getSortShortName()}
+                  </span>
+                </button>
+
+                {isSortOpen && (
+                  <div className="absolute right-0 top-full mt-2 w-64 bg-[var(--bg-surface)] border border-[var(--border-subtle)] rounded-[16px] shadow-[0_12px_40px_rgba(0,0,0,0.18)] p-2 z-50 animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                      Sort by
+                    </div>
+                    <div className="flex flex-col gap-0.5">
+                      {[
+                        { field: 'name' as SortField, label: 'Name', sub: 'File or alias name' },
+                        { field: 'date' as SortField, label: 'Date Added', sub: 'Upload timestamp' },
+                        { field: 'size' as SortField, label: 'File Size', sub: 'Smallest / Largest' },
+                        { field: 'type' as SortField, label: 'Format', sub: 'Extension / File type' },
+                      ].map((item) => {
+                        const isSelected = sortField === item.field;
+                        return (
+                          <button
+                            key={item.field}
+                            onClick={() => updateSort(item.field)}
+                            className={`w-full flex items-center justify-between px-2.5 py-2 rounded-[10px] text-left transition-colors ${
+                              isSelected 
+                                ? 'bg-[var(--accent-soft)] text-[var(--accent)] font-semibold' 
+                                : 'hover:bg-[var(--bg-neutral)] text-[var(--text-primary)] font-medium'
+                            }`}
+                          >
+                            <div className="flex flex-col">
+                              <span className="text-[13px] leading-tight">{item.label}</span>
+                              <span className="text-[11px] text-[var(--text-tertiary)] font-normal leading-tight mt-0.5">{item.sub}</span>
+                            </div>
+                            {isSelected && <Check size={16} className="text-[var(--accent)] shrink-0 ml-2" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div className="my-1.5 border-t border-[var(--border-subtle)]"></div>
+
+                    <div className="px-2.5 py-1.5 text-[11px] font-semibold text-[var(--text-tertiary)] uppercase tracking-wider">
+                      Direction
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        onClick={() => updateSort(sortField, 'asc')}
+                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-[8px] text-[12px] font-medium transition-colors border ${
+                          sortDirection === 'asc'
+                            ? 'bg-[var(--accent)] text-white border-[var(--accent)] font-semibold'
+                            : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        <ArrowUp size={13} />
+                        {sortField === 'date' ? 'Oldest' : sortField === 'size' ? 'Smallest' : 'A → Z'}
+                      </button>
+                      <button
+                        onClick={() => updateSort(sortField, 'desc')}
+                        className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-[8px] text-[12px] font-medium transition-colors border ${
+                          sortDirection === 'desc'
+                            ? 'bg-[var(--accent)] text-white border-[var(--accent)] font-semibold'
+                            : 'bg-[var(--bg-neutral)] text-[var(--text-secondary)] border-[var(--border-subtle)] hover:bg-[var(--bg-elevated)] hover:text-[var(--text-primary)]'
+                        }`}
+                      >
+                        <ArrowDown size={13} />
+                        {sortField === 'date' ? 'Newest' : sortField === 'size' ? 'Largest' : 'Z → A'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <button 
                 onClick={toggleDarkMode}
@@ -2032,9 +2230,36 @@ const renderSearchPath = (file: any) => {
             <div className="flex flex-col border border-[var(--border-subtle)] rounded-[18px] bg-[var(--bg-surface)]">
               <div className="hidden sm:flex items-center px-4 md:px-6 py-3 border-b border-[var(--border-subtle)] bg-[var(--bg-elevated)] rounded-t-[17px]">
                 <div className="w-10"></div>
-                <div className="flex-1 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider">Name</div>
-                <div className="w-32 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden sm:block">Size</div>
-                <div className="w-32 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden md:block">Date</div>
+                <button 
+                  onClick={() => updateSort('name')}
+                  className="flex-1 flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hover:text-[var(--accent)] transition-colors text-left"
+                  title="Sort by Name"
+                >
+                  Name
+                  {sortField === 'name' && (
+                    sortDirection === 'asc' ? <ArrowUp size={12} className="text-[var(--accent)]" /> : <ArrowDown size={12} className="text-[var(--accent)]" />
+                  )}
+                </button>
+                <button 
+                  onClick={() => updateSort('size')}
+                  className="w-32 flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden sm:flex hover:text-[var(--accent)] transition-colors text-left"
+                  title="Sort by Size"
+                >
+                  Size
+                  {sortField === 'size' && (
+                    sortDirection === 'asc' ? <ArrowUp size={12} className="text-[var(--accent)]" /> : <ArrowDown size={12} className="text-[var(--accent)]" />
+                  )}
+                </button>
+                <button 
+                  onClick={() => updateSort('date')}
+                  className="w-32 flex items-center gap-1.5 text-[12px] font-semibold text-[var(--text-secondary)] uppercase tracking-wider hidden md:flex hover:text-[var(--accent)] transition-colors text-left"
+                  title="Sort by Date"
+                >
+                  Date
+                  {sortField === 'date' && (
+                    sortDirection === 'asc' ? <ArrowUp size={12} className="text-[var(--accent)]" /> : <ArrowDown size={12} className="text-[var(--accent)]" />
+                  )}
+                </button>
               </div>
               {filteredFiles.map((file, fileIdx) => {
                 const displayName = file.user_alias || file.custom_name || file.original_name;
