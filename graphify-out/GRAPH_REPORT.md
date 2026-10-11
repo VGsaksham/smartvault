@@ -1,7 +1,7 @@
 # Graph Report - smartvault  (2026-10-11)
 
 ## Corpus Check
-- 181 files · ~94,562 words
+- 181 files · ~94,656 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `8f869ab4`
+- Built from commit: `20e6578c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 

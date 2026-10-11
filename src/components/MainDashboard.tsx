@@ -1475,6 +1475,23 @@ const toggleDarkMode = () => {
     }
   }, [files, activeCategory, activeFolder, deptFoldersMap]);
 
+  const getCategoryAvailableFolders = (catName: string) => {
+    if (!catName || catName === 'All files') return [];
+    const matchingDeptKey = Object.keys(deptFoldersMap).find(k => k.toLowerCase() === catName.toLowerCase()) || catName;
+    const allPaths = new Set<string>(deptFoldersMap[matchingDeptKey] || []);
+    if (Array.isArray(files)) {
+      files.forEach(f => {
+        if (String(f.category || '').toLowerCase() === catName.toLowerCase() && f.folder && f.folder !== 'null' && f.folder !== 'undefined') {
+          const parts = String(f.folder).split('/');
+          for (var i = 1; i <= parts.length; i++) {
+            allPaths.add(parts.slice(0, i).join('/'));
+          }
+        }
+      });
+    }
+    return Array.from(allPaths).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  };
+
   // Active subfolder within the category view (Moved to top of component)
 const renderSearchPath = (file: any) => {
     if (!searchQuery) return null;
@@ -2762,10 +2779,9 @@ const renderSearchPath = (file: any) => {
                 <label className="text-[12px] font-semibold text-[rgba(0,0,0,0.48)] uppercase tracking-[0.05em] mb-2 block">Folder <span className="normal-case font-normal">(optional)</span></label>
                 <div className="flex flex-wrap gap-2 mb-5">
                   <button onClick={() => setBulkMoveFolder('')} className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium transition-colors ${bulkMoveFolder === '' ? 'bg-[#007AFF] text-white' : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed]'}`}>No folder</button>
-                  {Array.from(new Set([...(deptFoldersMap[bulkMoveDept] || []), ...dynamicFolders]))
-                    .filter(Boolean)
+                  {getCategoryAvailableFolders(bulkMoveDept)
                     .filter(f => {
-                      if (bulkMoveDept === activeCategory) {
+                      if (bulkMoveDept.toLowerCase() === (activeCategory || '').toLowerCase()) {
                         for (const sp of selectedFolderPaths) {
                           if (f === sp || f.startsWith(sp + '/')) return false;
                         }
@@ -2814,7 +2830,7 @@ const renderSearchPath = (file: any) => {
                 <label className="text-[12px] font-semibold text-[rgba(0,0,0,0.48)] uppercase tracking-[0.05em] mb-2 block">Folder <span className="normal-case font-normal">(optional)</span></label>
                 <div className="flex flex-wrap gap-2 mb-5">
                   <button onClick={() => setBulkCopyFolder('')} className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium transition-colors ${bulkCopyFolder === '' ? 'bg-[#007AFF] text-white' : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed]'}`}>No folder</button>
-                  {Array.from(new Set([...(deptFoldersMap[bulkCopyDept] || []), ...dynamicFolders])).filter(Boolean).map(f => (
+                  {getCategoryAvailableFolders(bulkCopyDept).map(f => (
                     <button key={f} onClick={() => setBulkCopyFolder(f)} className={`px-3 py-1.5 rounded-[8px] text-[13px] font-medium transition-colors ${bulkCopyFolder === f ? 'bg-[#007AFF] text-white' : 'bg-[#f5f5f7] text-[#1d1d1f] hover:bg-[#e8e8ed]'}`}>{f}</button>
                   ))}
                 </div>

@@ -701,12 +701,19 @@ app.post('/api/folders/move', verifyToken, express.json(), async (req, res) => {
         }
 
         // Check collision: does another folder with this name exist in destination?
-        const conflictRes = await client.query(
-          `SELECT id FROM masterfolder_category_folders
-           WHERE category_id = $1 AND LOWER(name) = LOWER($2) AND ${targetParentFolderId ? 'parent_folder_id = $3' : 'parent_folder_id IS NULL'} AND id != $4
-           LIMIT 1`,
-          targetParentFolderId ? [targetCategoryId, folderName, targetParentFolderId, folderId] : [targetCategoryId, folderName, folderId]
-        );
+        const conflictRes = targetParentFolderId
+          ? await client.query(
+              `SELECT id FROM masterfolder_category_folders
+               WHERE category_id = $1 AND LOWER(name) = LOWER($2) AND parent_folder_id = $3 AND id != $4
+               LIMIT 1`,
+              [targetCategoryId, folderName, targetParentFolderId, folderId]
+            )
+          : await client.query(
+              `SELECT id FROM masterfolder_category_folders
+               WHERE category_id = $1 AND LOWER(name) = LOWER($2) AND parent_folder_id IS NULL AND id != $3
+               LIMIT 1`,
+              [targetCategoryId, folderName, folderId]
+            );
         if (conflictRes.rows.length > 0) {
           throw new Error(`A folder named "${folderName}" already exists in the destination.`);
         }
