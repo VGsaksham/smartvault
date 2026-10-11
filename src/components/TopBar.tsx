@@ -312,7 +312,7 @@ export default function TopBar() {
         await Promise.all(names.map((name) => caches.delete(name)));
       }
     } catch {}
-    window.location.href = window.location.pathname + '?_bust=' + Date.now();
+    window.location.reload();
   };
 
   const handleLogout = () => {

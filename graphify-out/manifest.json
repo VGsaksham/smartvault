@@ -20,8 +20,8 @@
     "semantic_hash": "a1d4bd248d139d0faa165930f5e606e2"
   },
   "next.config.ts": {
-    "mtime": 1791721466.7551694,
-    "ast_hash": "7bbf39734b162b0889ba8f59dcafc82d",
+    "mtime": 1791721751.9347942,
+    "ast_hash": "c22a61438eb842abf9760daae343fd7b",
     "semantic_hash": ""
   },
   "package.json": {
@@ -365,8 +365,8 @@
     "semantic_hash": "c222f67f9379f4df67aa2b6c8c212e62"
   },
   "src/app/layout.tsx": {
-    "mtime": 1791721373.3808126,
-    "ast_hash": "1d01e4f513ca5addce8c9024acd48e01",
+    "mtime": 1791721734.284946,
+    "ast_hash": "495d173d4baefdaa2c183dfc1d210724",
     "semantic_hash": ""
   },
   "src/app/login/page.tsx": {
@@ -440,8 +440,8 @@
     "semantic_hash": "90bc05664ec2ef8574ffb674373a2bef"
   },
   "src/components/TopBar.tsx": {
-    "mtime": 1791721409.6466513,
-    "ast_hash": "8d6f40a24094f89d4985fe1da5e41ce8",
+    "mtime": 1791721766.0966644,
+    "ast_hash": "255fa35676e82b05c0b26331f3fbae5a",
     "semantic_hash": ""
   },
   "src/components/ui/Select.tsx": {
@@ -952,11 +952,6 @@
   "view_put.js": {
     "mtime": 1787236186.756613,
     "ast_hash": "3fe847ea760079a90b4b456e42a6671e",
-    "semantic_hash": ""
-  },
-  "src/components/AutoVersionManager.tsx": {
-    "mtime": 1791721359.3847828,
-    "ast_hash": "9340dad3e4d1f0984ccbc08dfcd302d2",
     "semantic_hash": ""
   }
 }

@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import AutoVersionManager from "@/components/AutoVersionManager";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -44,7 +43,6 @@ export default function RootLayout({
       </head>
       <body className={`${inter.variable} font-sans antialiased`}>
         {children}
-        <AutoVersionManager />
       </body>
     </html>
   );

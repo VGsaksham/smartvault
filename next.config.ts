@@ -2,15 +2,6 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   productionBrowserSourceMaps: true,
-  generateBuildId: async () => {
-    return `build-${Date.now()}`;
-  },
-  experimental: {
-    staleTimes: {
-      dynamic: 0,
-      static: 30,
-    },
-  },
   async headers() {
     return [
       {

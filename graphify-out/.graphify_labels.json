@@ -126,7 +126,6 @@
   "124": "find_search.js",
   "125": "get_token.js",
   "126": "test-folders.js",
-  "127": "test_sort.js",
   "128": "test-struct.js",
   "129": "test_cte.js",
   "130": "view_put.js",
@@ -140,6 +139,5 @@
   "138": "test_query7.js",
   "139": "fix_hooks.py",
   "140": "remove_qrcode.py",
-  "141": "temp.tsx",
-  "142": "fix_index.js"
+  "141": "temp.tsx"
 }
